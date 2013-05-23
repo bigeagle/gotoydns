@@ -119,8 +119,8 @@ func (self *DNSServer) handleUpstream(upstream string) {
             dnsmsg.Unpack(msg, 0)
 
             log.Debug(dnsmsg.String())
-
-            localchan <- msg
+            pack, _ := dnsmsg.Pack()
+            localchan <- pack
         }
     }(upsockchan)
 

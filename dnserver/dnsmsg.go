@@ -11,65 +11,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+    "strings"
 	"net"
 )
-
-const (
-	// valid dnsRR_Header.Rrtype and dnsQuestion.qtype
-	dnsTypeA     = 1
-	dnsTypeNS    = 2
-	dnsTypeMD    = 3
-	dnsTypeMF    = 4
-	dnsTypeCNAME = 5
-	dnsTypeSOA   = 6
-	dnsTypeMB    = 7
-	dnsTypeMG    = 8
-	dnsTypeMR    = 9
-	dnsTypeNULL  = 10
-	dnsTypeWKS   = 11
-	dnsTypePTR   = 12
-	dnsTypeHINFO = 13
-	dnsTypeMINFO = 14
-	dnsTypeMX    = 15
-	dnsTypeTXT   = 16
-	dnsTypeAAAA  = 28
-	dnsTypeSRV   = 33
-
-	// valid dnsQuestion.qtype only
-	dnsTypeAXFR  = 252
-	dnsTypeMAILB = 253
-	dnsTypeMAILA = 254
-	dnsTypeALL   = 255
-
-	// valid dnsQuestion.qclass
-	dnsClassINET   = 1
-	dnsClassCSNET  = 2
-	dnsClassCHAOS  = 3
-	dnsClassHESIOD = 4
-	dnsClassANY    = 255
-
-	// dnsMsg.rcode
-	dnsRcodeSuccess        = 0
-	dnsRcodeFormatError    = 1
-	dnsRcodeServerFailure  = 2
-	dnsRcodeNameError      = 3
-	dnsRcodeNotImplemented = 4
-	dnsRcodeRefused        = 5
-)
-
-const (
-	// dnsHeader.Bits
-	_QR = 1 << 15 // query/response (response=1)
-	_AA = 1 << 10 // authoritative
-	_TC = 1 << 9  // truncated
-	_RD = 1 << 8  // recursion desired
-	_RA = 1 << 7  // recursion available
-)
-
-type dnsStruct interface {
-	Pack() ([]byte, error)
-	Unpack([]byte, int) (next int, err error)
-}
 
 type dnsHeader struct {
 	Id                                 uint16
@@ -118,9 +62,11 @@ type dnsMsg struct {
 	answer   []dnsRR
 	ns       []dnsRR
 	extra    []dnsRR
+    names    map[string] int //map name -> offset
 }
 
 func (self *dnsMsg) Pack() ([]byte, error) {
+    var buf bytes.Buffer
 	var dh dnsHeader
 
 	// Convert convenient dnsMsg into wire-like dnsHeader.
@@ -152,7 +98,42 @@ func (self *dnsMsg) Pack() ([]byte, error) {
 	dh.Nscount = uint16(len(ns))
 	dh.Arcount = uint16(len(extra))
 
-	return dh.Pack()
+    dh_pack, _ := dh.Pack()
+    buf.Write(dh_pack)
+
+    if self.names == nil {
+        self.names = make(map[string] int)
+    }
+
+    off := len(dh_pack)
+    for _, q := range question {
+        pack, _ := q.Pack(self.names, off)
+        buf.Write(pack)
+        off += len(pack)
+    }
+
+    for _, a := range answer {
+        log.Debug(a.String())
+        pack, _ := a.Pack(self.names, off)
+        buf.Write(pack)
+        off += len(pack)
+    }
+
+    for _, n := range ns {
+        log.Debug(n.String())
+        pack, _ := n.Pack(self.names, off)
+        buf.Write(pack)
+        off += len(pack)
+    }
+
+    //for _, e := range extra {
+    //    log.Debug(e.String())
+    //    pack, _ := e.Pack(self.names, off)
+    //    buf.Write(pack)
+    //    off += len(pack)
+    //}
+
+	return buf.Bytes(), nil
 }
 
 func (self *dnsMsg) Unpack(msg []byte, off int) (next int, err error) {
@@ -250,6 +231,19 @@ func (self *dnsQuestion) Unpack(msg []byte, off int) (next int, err error) {
 	return next, nil
 }
 
+func (self *dnsQuestion) Pack(names map[string]int, off int) (pack []byte, err error) {
+
+    buf := bytes.NewBuffer([]byte{})
+
+    buf.Write(packName(self.Name, names, off))
+
+    binary.Write(buf, binary.BigEndian, self.Qtype)
+    binary.Write(buf, binary.BigEndian, self.Qclass)
+
+    return buf.Bytes(), nil
+}
+
+
 func (self *dnsQuestion) String() string {
 	return fmt.Sprintf("{name: %s, qtype: %d, qclass: %d}", self.Name, self.Qtype, self.Qclass)
 }
@@ -262,6 +256,7 @@ var rr_mk = map[int]func() dnsRR{
 type dnsRR interface {
 	setHeader(*dnsRR_Header)
 	unpackRdata([]byte, int)
+    Pack(names map[string]int, off int) ([]byte, error)
 	String() string
 }
 
@@ -294,6 +289,26 @@ func (self *dnsRR_Header) Unpack(msg []byte, off int) (next int, err error) {
 	return next, nil
 }
 
+func (self *dnsRR_Header) Pack(names map[string]int, off int) (*bytes.Buffer, error) {
+    buf := bytes.NewBuffer([]byte{})
+
+    buf.Write(packName(self.Name, names, off))
+
+    var data = []interface{}{
+        self.Rrtype,
+        self.Class,
+        self.Ttl,
+        self.Rdlength,
+    }
+
+    for _, v := range data {
+        binary.Write(buf, binary.BigEndian, v)
+    }
+
+    return buf, nil
+
+}
+
 type dnsRR_unknown struct {
 	Hdr      *dnsRR_Header
 	rawRdata []byte
@@ -311,6 +326,13 @@ func (self *dnsRR_unknown) String() string {
 
 func (self *dnsRR_unknown) unpackRdata(msg []byte, off int) {
 	self.rawRdata = msg[off:]
+}
+
+
+func (self *dnsRR_unknown) Pack(names map[string] int, off int) ([]byte, error) {
+    buf, _ := self.Hdr.Pack(names, off)
+    buf.Write(self.rawRdata)
+    return buf.Bytes(), nil
 }
 
 type dnsRR_A struct {
@@ -331,6 +353,12 @@ func (self *dnsRR_A) String() string {
 		net.IPv4(byte(self.A>>24), byte(self.A>>16), byte(self.A>>8), byte(self.A)).String())
 }
 
+func (self *dnsRR_A) Pack(names map[string] int, off int) ([]byte, error) {
+    buf, _ := self.Hdr.Pack(names, off)
+    binary.Write(buf, binary.BigEndian, self.A)
+    return buf.Bytes(), nil
+}
+
 type dnsRR_CNAME struct {
 	dnsRR_unknown
 	CNAME string
@@ -345,6 +373,31 @@ func (self *dnsRR_CNAME) String() string {
 	return fmt.Sprintf(
 		"{name: %s, TTL: %d, class: %d, type: CNAME, rdata: %s}",
 		header.Name, header.Ttl, header.Class, self.CNAME)
+}
+
+func (self *dnsRR_CNAME) Pack(names map[string] int, off int) ([]byte, error) {
+    buf := bytes.NewBuffer([]byte{})
+    namePack := packName(self.Hdr.Name, names, off)
+    buf.Write(namePack)
+    off += 10 + len(namePack)
+
+    cnamePack := packName(self.CNAME, names, off)
+
+    self.Hdr.Rdlength = uint16(len(cnamePack))
+
+    var data = []interface{} {
+        self.Hdr.Rrtype,
+        self.Hdr.Class,
+        self.Hdr.Ttl,
+        self.Hdr.Rdlength,
+    }
+
+    for _, v := range data {
+        binary.Write(buf, binary.BigEndian, v)
+    }
+
+    buf.Write(cnamePack)
+    return buf.Bytes(), nil
 }
 
 func unpackRR(msg []byte, off int) (rr dnsRR, next int, err error) {
@@ -418,4 +471,24 @@ Loop:
 		next = i
 	}
 	return name, next, nil
+}
+
+func packName(name string, names map[string]int, off int) []byte {
+    buf := bytes.NewBuffer([]byte{})
+
+    offset, found := names[name]
+
+    if found {
+        binary.Write(buf, binary.BigEndian, uint16(offset) | uint16(0xC0 << 8))
+    } else {
+        names[name] = off
+        records := strings.Split(name, ".")
+        for _, r := range records {
+            buf.WriteByte(byte(len(r)))
+            if len(r) > 0 {
+                buf.Write([]byte(r))
+            }
+        }
+    }
+    return buf.Bytes()
 }
