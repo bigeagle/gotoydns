@@ -7,11 +7,11 @@
 package toydns
 
 import (
-    "fmt"
-    "bytes"
-    "net"
-    "encoding/binary"
-    "errors"
+	"bytes"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"net"
 )
 
 const (
@@ -66,10 +66,9 @@ const (
 	_RA = 1 << 7  // recursion available
 )
 
-
 type dnsStruct interface {
-    Pack() ([]byte, error);
-    Unpack([]byte, int) (next int, err error);
+	Pack() ([]byte, error)
+	Unpack([]byte, int) (next int, err error)
 }
 
 type dnsHeader struct {
@@ -79,19 +78,19 @@ type dnsHeader struct {
 }
 
 func (self *dnsHeader) Unpack(msg []byte, off int) (next int, err error) {
-    buf := bytes.NewBuffer(msg[off:off+12])
-    err = binary.Read(buf, binary.BigEndian, self)
-    if err != nil {
-        return len(msg), err
-    } else {
-        return 12, nil
-    }
+	buf := bytes.NewBuffer(msg[off : off+12])
+	err = binary.Read(buf, binary.BigEndian, self)
+	if err != nil {
+		return len(msg), err
+	} else {
+		return 12, nil
+	}
 }
 
 func (self *dnsHeader) Pack() ([]byte, error) {
-    buf := new(bytes.Buffer)
-    err := binary.Write(buf, binary.BigEndian, self)
-    return buf.Bytes(), err
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.BigEndian, self)
+	return buf.Bytes(), err
 }
 
 type dnsMsgHeader struct {
@@ -106,21 +105,20 @@ type dnsMsgHeader struct {
 }
 
 func (self *dnsMsgHeader) String() string {
-    return fmt.Sprintf(
-        "{id: %d, response: %t, opcode: %d, authoritative: %t, " +
-        "truncated: %t, RD: %t, RA: %t, rcode: %d}",
-        self.id, self.response, self.opcode, self.authoritative, self.truncated,
-        self.recursion_desired, self.recursion_available, self.rcode)
+	return fmt.Sprintf(
+		"{id: %d, response: %t, opcode: %d, authoritative: %t, "+
+			"truncated: %t, RD: %t, RA: %t, rcode: %d}",
+		self.id, self.response, self.opcode, self.authoritative, self.truncated,
+		self.recursion_desired, self.recursion_available, self.rcode)
 }
 
 type dnsMsg struct {
-    dnsMsgHeader
+	dnsMsgHeader
 	question []dnsQuestion
 	answer   []dnsRR
 	ns       []dnsRR
 	extra    []dnsRR
 }
-
 
 func (self *dnsMsg) Pack() ([]byte, error) {
 	var dh dnsHeader
@@ -144,7 +142,7 @@ func (self *dnsMsg) Pack() ([]byte, error) {
 		dh.Bits |= _QR
 	}
 
-    question := self.question
+	question := self.question
 	answer := self.answer
 	ns := self.ns
 	extra := self.extra
@@ -154,18 +152,17 @@ func (self *dnsMsg) Pack() ([]byte, error) {
 	dh.Nscount = uint16(len(ns))
 	dh.Arcount = uint16(len(extra))
 
-    return dh.Pack()
+	return dh.Pack()
 }
-
 
 func (self *dnsMsg) Unpack(msg []byte, off int) (next int, err error) {
 	var dh dnsHeader
 
-    if off, err = dh.Unpack(msg, 0); err != nil {
-        return len(msg), err
-    }
+	if off, err = dh.Unpack(msg, 0); err != nil {
+		return len(msg), err
+	}
 
-    self.id = dh.Id
+	self.id = dh.Id
 	self.response = (dh.Bits & _QR) != 0
 	self.opcode = int(dh.Bits>>11) & 0xF
 	self.authoritative = (dh.Bits & _AA) != 0
@@ -174,65 +171,63 @@ func (self *dnsMsg) Unpack(msg []byte, off int) (next int, err error) {
 	self.recursion_available = (dh.Bits & _RA) != 0
 	self.rcode = int(dh.Bits & 0xF)
 
-    self.question = make([]dnsQuestion, dh.Qdcount)
+	self.question = make([]dnsQuestion, dh.Qdcount)
 	self.answer = make([]dnsRR, 0, dh.Ancount)
 	self.ns = make([]dnsRR, 0, dh.Nscount)
 	self.extra = make([]dnsRR, 0, dh.Arcount)
 
+	for i := uint16(0); i < dh.Qdcount; i++ {
+		dq := &self.question[i]
+		off, err = dq.Unpack(msg, off)
+	}
 
-    for i := uint16(0); i < dh.Qdcount; i++ {
-        dq := &self.question[i]
-        off, err = dq.Unpack(msg, off)
-    }
+	for i := uint16(0); i < dh.Ancount; i++ {
+		var ans dnsRR
+		ans, off, err = unpackRR(msg, off)
+		self.answer = append(self.answer, ans)
+	}
 
-    for i := uint16(0); i < dh.Ancount; i++ {
-        var ans dnsRR
-        ans, off, err = unpackRR(msg, off)
-        self.answer = append(self.answer, ans)
-    }
+	for i := uint16(0); i < dh.Nscount; i++ {
+		var ns dnsRR
+		ns, off, err = unpackRR(msg, off)
+		self.ns = append(self.ns, ns)
+	}
 
-    for i := uint16(0); i < dh.Nscount; i++ {
-        var ns dnsRR
-        ns, off, err = unpackRR(msg, off)
-        self.ns = append(self.ns, ns)
-    }
+	for i := uint16(0); i < dh.Arcount; i++ {
+		var ex dnsRR
+		ex, off, err = unpackRR(msg, off)
+		self.extra = append(self.extra, ex)
+	}
 
-    for i := uint16(0); i < dh.Arcount; i++ {
-        var ex dnsRR
-        ex, off, err = unpackRR(msg, off)
-        self.extra = append(self.extra, ex)
-    }
-
-    return len(msg), nil
+	return len(msg), nil
 }
 
 func (self *dnsMsg) String() string {
-    s := "DNS: \n"
-    s += "Header: "
-    s += self.dnsMsgHeader.String() + "\n"
-    s += fmt.Sprintf("%d Questions:\n", len(self.question))
-    for _, q := range self.question {
-        s += q.String() + "\n"
-    }
+	s := "DNS: \n"
+	s += "Header: "
+	s += self.dnsMsgHeader.String() + "\n"
+	s += fmt.Sprintf("%d Questions:\n", len(self.question))
+	for _, q := range self.question {
+		s += q.String() + "\n"
+	}
 
-    s += fmt.Sprintf("%d Answers:\n", len(self.answer))
-    for _, a := range self.answer {
-        s += a.String() + "\n"
-    }
+	s += fmt.Sprintf("%d Answers:\n", len(self.answer))
+	for _, a := range self.answer {
+		s += a.String() + "\n"
+	}
 
-    s += fmt.Sprintf("%d Authorities:\n", len(self.answer))
-    for _, a := range self.ns {
-        s += a.String() + "\n"
-    }
+	s += fmt.Sprintf("%d Authorities:\n", len(self.answer))
+	for _, a := range self.ns {
+		s += a.String() + "\n"
+	}
 
-    s += fmt.Sprintf("%d Additional:\n", len(self.answer))
-    for _, a := range self.extra {
-        s += a.String() + "\n"
-    }
+	s += fmt.Sprintf("%d Additional:\n", len(self.answer))
+	for _, a := range self.extra {
+		s += a.String() + "\n"
+	}
 
-    return s
+	return s
 }
-
 
 // DNS queries.
 type dnsQuestion struct {
@@ -241,39 +236,34 @@ type dnsQuestion struct {
 	Qclass uint16
 }
 
-
 func (self *dnsQuestion) Unpack(msg []byte, off int) (next int, err error) {
-    i := off
-    if self.Name, i, err = unpackName(msg, i); err != nil {
-        return len(msg), err
-    }
+	i := off
+	if self.Name, i, err = unpackName(msg, i); err != nil {
+		return len(msg), err
+	}
 
-    buf := bytes.NewBuffer(msg[i:i+4])
-    binary.Read(buf, binary.BigEndian, &(self.Qtype))
-    binary.Read(buf, binary.BigEndian, &(self.Qclass))
-    next = i + 4
+	buf := bytes.NewBuffer(msg[i : i+4])
+	binary.Read(buf, binary.BigEndian, &(self.Qtype))
+	binary.Read(buf, binary.BigEndian, &(self.Qclass))
+	next = i + 4
 
-    return next, nil
+	return next, nil
 }
-
 
 func (self *dnsQuestion) String() string {
-    return fmt.Sprintf("{name: %s, qtype: %d, qclass: %d}", self.Name, self.Qtype, self.Qclass)
+	return fmt.Sprintf("{name: %s, qtype: %d, qclass: %d}", self.Name, self.Qtype, self.Qclass)
 }
 
-
-var rr_mk = map[int]func() dnsRR {
+var rr_mk = map[int]func() dnsRR{
 	dnsTypeCNAME: func() dnsRR { return new(dnsRR_CNAME) },
 	dnsTypeA:     func() dnsRR { return new(dnsRR_A) },
 }
 
-
 type dnsRR interface {
 	setHeader(*dnsRR_Header)
-    unpackRdata([]byte, int)
-    String() string
+	unpackRdata([]byte, int)
+	String() string
 }
-
 
 // DNS responses (resource records).
 // There are many types of messages,
@@ -286,128 +276,125 @@ type dnsRR_Header struct {
 	Rdlength uint16 // length of data after header
 }
 
-
 func (self *dnsRR_Header) Unpack(msg []byte, off int) (next int, err error) {
-    i := off
+	i := off
 
-    if self.Name, i, err = unpackName(msg, i); err != nil {
-        return len(msg), err
-    }
-    buf := bytes.NewBuffer(msg[i: i+10])
+	if self.Name, i, err = unpackName(msg, i); err != nil {
+		return len(msg), err
+	}
+	buf := bytes.NewBuffer(msg[i : i+10])
 
-    binary.Read(buf, binary.BigEndian, &(self.Rrtype))
-    binary.Read(buf, binary.BigEndian, &(self.Class))
-    binary.Read(buf, binary.BigEndian, &(self.Ttl))
-    binary.Read(buf, binary.BigEndian, &(self.Rdlength))
+	binary.Read(buf, binary.BigEndian, &(self.Rrtype))
+	binary.Read(buf, binary.BigEndian, &(self.Class))
+	binary.Read(buf, binary.BigEndian, &(self.Ttl))
+	binary.Read(buf, binary.BigEndian, &(self.Rdlength))
 
-    next = i + 10
+	next = i + 10
 
-    return next, nil
+	return next, nil
 }
 
 type dnsRR_unknown struct {
-    Hdr *dnsRR_Header
-    rawRdata []byte
+	Hdr      *dnsRR_Header
+	rawRdata []byte
 }
 
 func (self *dnsRR_unknown) setHeader(header *dnsRR_Header) {
-    self.Hdr = header
+	self.Hdr = header
 }
 
 func (self *dnsRR_unknown) String() string {
-    header := self.Hdr
-    return fmt.Sprintf("{name: %s, TTL: %d, class: %d, type: UNKNOWN, rdata: % x}",
-                       header.Name, header.Ttl, header.Class, self.rawRdata)
+	header := self.Hdr
+	return fmt.Sprintf("{name: %s, TTL: %d, class: %d, type: UNKNOWN, rdata: % x}",
+		header.Name, header.Ttl, header.Class, self.rawRdata)
 }
 
 func (self *dnsRR_unknown) unpackRdata(msg []byte, off int) {
-    self.rawRdata = msg[off:]
+	self.rawRdata = msg[off:]
 }
 
-
 type dnsRR_A struct {
-    dnsRR_unknown
-    A   uint32 `net:"ipv4"`
+	dnsRR_unknown
+	A uint32 `net:"ipv4"`
 }
 
 func (self *dnsRR_A) unpackRdata(msg []byte, off int) {
-    buf := bytes.NewBuffer(msg[off:off+4])
-    binary.Read(buf, binary.BigEndian, &self.A)
+	buf := bytes.NewBuffer(msg[off : off+4])
+	binary.Read(buf, binary.BigEndian, &self.A)
 }
 
 func (self *dnsRR_A) String() string {
-    header := self.Hdr
-    return fmt.Sprintf(
-        "{name: %s, TTL: %d, class: %d, type: A, rdata: %s}",
-        header.Name, header.Ttl, header.Class,
+	header := self.Hdr
+	return fmt.Sprintf(
+		"{name: %s, TTL: %d, class: %d, type: A, rdata: %s}",
+		header.Name, header.Ttl, header.Class,
 		net.IPv4(byte(self.A>>24), byte(self.A>>16), byte(self.A>>8), byte(self.A)).String())
 }
 
 type dnsRR_CNAME struct {
-    dnsRR_unknown
-	CNAME   string
+	dnsRR_unknown
+	CNAME string
 }
 
 func (self *dnsRR_CNAME) unpackRdata(msg []byte, off int) {
-    self.CNAME, _, _ = unpackName(msg, off)
+	self.CNAME, _, _ = unpackName(msg, off)
 }
 
 func (self *dnsRR_CNAME) String() string {
-    header := self.Hdr
-    return fmt.Sprintf(
-        "{name: %s, TTL: %d, class: %d, type: CNAME, rdata: %s}",
-        header.Name, header.Ttl, header.Class, self.CNAME)
+	header := self.Hdr
+	return fmt.Sprintf(
+		"{name: %s, TTL: %d, class: %d, type: CNAME, rdata: %s}",
+		header.Name, header.Ttl, header.Class, self.CNAME)
 }
 
 func unpackRR(msg []byte, off int) (rr dnsRR, next int, err error) {
-    i := off
-    header := new(dnsRR_Header)
+	i := off
+	header := new(dnsRR_Header)
 
-    if i, err = header.Unpack(msg, off); err != nil {
-        return nil, len(msg), err
-    }
+	if i, err = header.Unpack(msg, off); err != nil {
+		return nil, len(msg), err
+	}
 
 	mk, known := rr_mk[int(header.Rrtype)]
 
-    if !known {
-        rr = new(dnsRR_unknown)
-    } else {
-        rr = mk()
-    }
+	if !known {
+		rr = new(dnsRR_unknown)
+	} else {
+		rr = mk()
+	}
 
-    next = i + int(header.Rdlength)
-    rr.setHeader(header)
-    rr.unpackRdata(msg[:next], i)
-    return rr, next, nil
+	next = i + int(header.Rdlength)
+	rr.setHeader(header)
+	rr.unpackRdata(msg[:next], i)
+	return rr, next, nil
 }
 
-
 func unpackName(msg []byte, off int) (name string, next int, err error) {
-    name = ""
-    ptr := 0
-    i := off
-    err = errors.New("offset error")
+	name = ""
+	ptr := 0
+	i := off
+	err = errors.New("offset error")
 Loop:
-    for {
-        if i > len(msg) {
-            return "", len(msg), err
-        }
-        c := int(msg[i])
-        i++
-        switch c & 0xC0 {
-        case 0x00:
-            if c == 0x00 {
-                //name end
-                break Loop
-            }
-            if i + c > len(msg) {
-                return "", len(msg), err
-            }
+	for {
+		if i > len(msg) {
+			return "", len(msg), err
+		}
+		c := int(msg[i])
+		i++
+		switch c & 0xC0 {
+		case 0x00:
+			if c == 0x00 {
+				//name end
+				break Loop
+			}
+			if i+c > len(msg) {
+				return "", len(msg), err
+			}
 			name += string(msg[i:i+c]) + "."
-            i += c
+			i += c
 
-        // Compressed Record
-        case 0xC0:
+		// Compressed Record
+		case 0xC0:
 			if i >= len(msg) {
 				return "", len(msg), err
 			}
@@ -421,14 +408,14 @@ Loop:
 			}
 			i = (c^0xC0)<<8 | int(c1)
 
-        default:
-            return "", len(msg), err
-        }
+		default:
+			return "", len(msg), err
+		}
 
-    }
+	}
 
-    if ptr == 0 {
-        next = i
-    }
-    return name, next, nil
+	if ptr == 0 {
+		next = i
+	}
+	return name, next, nil
 }
