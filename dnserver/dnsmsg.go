@@ -66,8 +66,57 @@ type dnsMsg struct {
 }
 
 func (self *dnsMsg) Pack() ([]byte, error) {
-    var buf bytes.Buffer
+    var buf, body bytes.Buffer
 	var dh dnsHeader
+
+    if self.names == nil {
+        self.names = make(map[string] int)
+    }
+
+    nans, nns, nex := 0, 0, 0
+    off := 12
+
+    for _, q := range self.question {
+        if pack, err := q.Pack(self.names, off); err != nil {
+            log.Debug("%s", err)
+        } else {
+            body.Write(pack)
+            off += len(pack)
+        }
+    }
+
+    for _, a := range self.answer {
+        //log.Debug(a.String())
+        if pack, err := a.Pack(self.names, off); err != nil {
+            log.Debug("%s", err)
+        } else {
+            body.Write(pack)
+            off += len(pack)
+            nans++
+        }
+    }
+
+    for _, n := range self.ns {
+        //log.Debug(n.String())
+        if pack, err := n.Pack(self.names, off); err != nil {
+            log.Debug("%s", err)
+        } else {
+            body.Write(pack)
+            off += len(pack)
+            nns ++
+        }
+    }
+
+    for _, e := range self.extra {
+        //log.Debug(n.String())
+        if pack, err := e.Pack(self.names, off); err != nil {
+            log.Debug("%s", err)
+        } else {
+            body.Write(pack)
+            off += len(pack)
+            nex ++
+        }
+    }
 
 	// Convert convenient dnsMsg into wire-like dnsHeader.
 	dh.Id = self.id
@@ -88,50 +137,14 @@ func (self *dnsMsg) Pack() ([]byte, error) {
 		dh.Bits |= _QR
 	}
 
-	question := self.question
-	answer := self.answer
-	ns := self.ns
-	extra := self.extra
-
-	dh.Qdcount = uint16(len(question))
-	dh.Ancount = uint16(len(answer))
-	dh.Nscount = uint16(len(ns))
-	dh.Arcount = uint16(len(extra))
+	dh.Qdcount = uint16(len(self.question))
+	dh.Ancount = uint16(nans)
+	dh.Nscount = uint16(nns)
+	dh.Arcount = uint16(nex)
 
     dh_pack, _ := dh.Pack()
     buf.Write(dh_pack)
-
-    if self.names == nil {
-        self.names = make(map[string] int)
-    }
-
-    off := len(dh_pack)
-    for _, q := range question {
-        pack, _ := q.Pack(self.names, off)
-        buf.Write(pack)
-        off += len(pack)
-    }
-
-    for _, a := range answer {
-        log.Debug(a.String())
-        pack, _ := a.Pack(self.names, off)
-        buf.Write(pack)
-        off += len(pack)
-    }
-
-    for _, n := range ns {
-        log.Debug(n.String())
-        pack, _ := n.Pack(self.names, off)
-        buf.Write(pack)
-        off += len(pack)
-    }
-
-    //for _, e := range extra {
-    //    log.Debug(e.String())
-    //    pack, _ := e.Pack(self.names, off)
-    //    buf.Write(pack)
-    //    off += len(pack)
-    //}
+    buf.Write(body.Bytes())
 
 	return buf.Bytes(), nil
 }
@@ -332,7 +345,7 @@ func (self *dnsRR_unknown) unpackRdata(msg []byte, off int) {
 func (self *dnsRR_unknown) Pack(names map[string] int, off int) ([]byte, error) {
     buf, _ := self.Hdr.Pack(names, off)
     buf.Write(self.rawRdata)
-    return buf.Bytes(), nil
+    return buf.Bytes(), errors.New("unknown RR type")
 }
 
 type dnsRR_A struct {
