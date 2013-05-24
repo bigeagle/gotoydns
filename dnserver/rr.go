@@ -7,19 +7,21 @@ import (
 	"net"
 )
 
-
 var rr_mk = map[int]func() dnsRR{
 	dnsTypeCNAME: func() dnsRR { return new(dnsRR_CNAME) },
 	dnsTypeA:     func() dnsRR { return new(dnsRR_A) },
 	dnsTypeAAAA:  func() dnsRR { return new(dnsRR_AAAA) },
-    dnsTypeNS:    func() dnsRR { return new(dnsRR_NS) },
-    dnsTypeOPT:    func() dnsRR { return new(dnsRR_OPT) },
+	dnsTypeNS:    func() dnsRR { return new(dnsRR_NS) },
+	dnsTypeOPT:   func() dnsRR { return new(dnsRR_OPT) },
 }
 
 type dnsRR interface {
+    Header() *dnsRR_Header
+    Rdata() interface{}
 	setHeader(*dnsRR_Header)
+	setRdata(data interface{}) error
 	unpackRdata([]byte, int)
-    Pack(names map[string]int, off int) ([]byte, error)
+	Pack(names map[string]int, off int) ([]byte, error)
 	String() string
 }
 
@@ -53,22 +55,22 @@ func (self *dnsRR_Header) Unpack(msg []byte, off int) (next int, err error) {
 }
 
 func (self *dnsRR_Header) Pack(names map[string]int, off int) (*bytes.Buffer, error) {
-    buf := bytes.NewBuffer([]byte{})
+	buf := bytes.NewBuffer([]byte{})
 
-    buf.Write(packName(self.Name, names, off))
+	buf.Write(packName(self.Name, names, off))
 
-    var data = []interface{}{
-        self.Rrtype,
-        self.Class,
-        self.Ttl,
-        self.Rdlength,
-    }
+	var data = []interface{}{
+		self.Rrtype,
+		self.Class,
+		self.Ttl,
+		self.Rdlength,
+	}
 
-    for _, v := range data {
-        binary.Write(buf, binary.BigEndian, v)
-    }
+	for _, v := range data {
+		binary.Write(buf, binary.BigEndian, v)
+	}
 
-    return buf, nil
+	return buf, nil
 
 }
 
@@ -77,8 +79,30 @@ type dnsRR_unknown struct {
 	rawRdata []byte
 }
 
+func (self *dnsRR_unknown) Header() *dnsRR_Header {
+    return self.Hdr
+}
+
+func (self *dnsRR_unknown) Rdata() interface{} {
+    return self.rawRdata
+}
+
 func (self *dnsRR_unknown) setHeader(header *dnsRR_Header) {
 	self.Hdr = header
+}
+
+func (self *dnsRR_unknown) setRdata(data interface{}) error {
+	switch v := data.(type) {
+	case []byte:
+		self.rawRdata = v
+	case string:
+		self.rawRdata = []byte(v)
+	case bytes.Buffer:
+		self.rawRdata = v.Bytes()
+	default:
+		return fmt.Errorf("Unsupported type")
+	}
+	return nil
 }
 
 func (self *dnsRR_unknown) String() string {
@@ -91,17 +115,20 @@ func (self *dnsRR_unknown) unpackRdata(msg []byte, off int) {
 	self.rawRdata = msg[off:]
 }
 
-
-func (self *dnsRR_unknown) Pack(names map[string] int, off int) ([]byte, error) {
-    buf, _ := self.Hdr.Pack(names, off)
-    buf.Write(self.rawRdata)
-    return buf.Bytes(), fmt.Errorf("unknown RR type: %d", self.Hdr.Rrtype)
+func (self *dnsRR_unknown) Pack(names map[string]int, off int) ([]byte, error) {
+	buf, _ := self.Hdr.Pack(names, off)
+	buf.Write(self.rawRdata)
+	return buf.Bytes(), fmt.Errorf("unknown RR type: %d", self.Hdr.Rrtype)
 }
 
 //A
 type dnsRR_A struct {
 	dnsRR_unknown
 	A uint32 `net:"ipv4"`
+}
+
+func (self *dnsRR_A) Rdata() interface{} {
+    return self.A
 }
 
 func (self *dnsRR_A) unpackRdata(msg []byte, off int) {
@@ -117,12 +144,32 @@ func (self *dnsRR_A) String() string {
 		net.IPv4(byte(self.A>>24), byte(self.A>>16), byte(self.A>>8), byte(self.A)).String())
 }
 
-func (self *dnsRR_A) Pack(names map[string] int, off int) ([]byte, error) {
-    buf, _ := self.Hdr.Pack(names, off)
-    binary.Write(buf, binary.BigEndian, self.A)
-    return buf.Bytes(), nil
+func (self *dnsRR_A) Pack(names map[string]int, off int) ([]byte, error) {
+	buf, _ := self.Hdr.Pack(names, off)
+	binary.Write(buf, binary.BigEndian, self.A)
+	return buf.Bytes(), nil
 }
 
+func (self *dnsRR_A) setRdata(data interface{}) error {
+	toInt32 := func(ip net.IP) uint32 {
+        buf := bytes.NewBuffer(ip.To4()[0:4])
+        uint32Ip := uint32(0)
+        binary.Read(buf, binary.BigEndian, &uint32Ip)
+        return uint32Ip
+    }
+
+	switch v := data.(type) {
+	case net.IP:
+		self.A = toInt32(v)
+	case string:
+		self.A = toInt32(net.ParseIP(v))
+	case uint32:
+		self.A = v
+	default:
+		return fmt.Errorf("Unsupported type")
+	}
+	return nil
+}
 
 //AAAA
 type dnsRR_AAAA struct {
@@ -130,9 +177,13 @@ type dnsRR_AAAA struct {
 	AAAA [16]byte `net:"ipv6"`
 }
 
+func (self *dnsRR_AAAA) Rdata() interface{} {
+    return self.AAAA
+}
+
 func (self *dnsRR_AAAA) unpackRdata(msg []byte, off int) {
 	buf := bytes.NewBuffer(msg[off : off+16])
-    buf.Read(self.AAAA[:])
+	buf.Read(self.AAAA[:])
 }
 
 func (self *dnsRR_AAAA) String() string {
@@ -140,20 +191,46 @@ func (self *dnsRR_AAAA) String() string {
 	return fmt.Sprintf(
 		"{name: %s, TTL: %d, class: %d, type: AAAA, rdata: %s}",
 		header.Name, header.Ttl, header.Class,
-        net.IP(self.AAAA[:]).String())
+		net.IP(self.AAAA[:]).String())
 }
 
-func (self *dnsRR_AAAA) Pack(names map[string] int, off int) ([]byte, error) {
-    buf, _ := self.Hdr.Pack(names, off)
-    buf.Write(self.AAAA[:])
-    return buf.Bytes(), nil
+func (self *dnsRR_AAAA) Pack(names map[string]int, off int) ([]byte, error) {
+	buf, _ := self.Hdr.Pack(names, off)
+	buf.Write(self.AAAA[:])
+	return buf.Bytes(), nil
 }
 
+func (self *dnsRR_AAAA) setRdata(data interface{}) error {
+
+	switch v := data.(type) {
+	case net.IP:
+		if len(v) == net.IPv6len {
+			for i, x := range v {
+				self.AAAA[i] = x
+			}
+			return nil
+		}
+	case string:
+		if ip := net.ParseIP(v); ip != nil {
+			if len(ip) == net.IPv6len {
+				for i, x := range ip {
+					self.AAAA[i] = x
+				}
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("Unsupported type")
+}
 
 //CNAME
 type dnsRR_CNAME struct {
 	dnsRR_unknown
 	CNAME string
+}
+
+func (self *dnsRR_CNAME) Rdata() interface{} {
+    return self.CNAME
 }
 
 func (self *dnsRR_CNAME) unpackRdata(msg []byte, off int) {
@@ -167,35 +244,53 @@ func (self *dnsRR_CNAME) String() string {
 		header.Name, header.Ttl, header.Class, self.CNAME)
 }
 
-func (self *dnsRR_CNAME) Pack(names map[string] int, off int) ([]byte, error) {
-    buf := bytes.NewBuffer([]byte{})
-    namePack := packName(self.Hdr.Name, names, off)
-    buf.Write(namePack)
-    off += 10 + len(namePack)
+func (self *dnsRR_CNAME) Pack(names map[string]int, off int) ([]byte, error) {
+	buf := bytes.NewBuffer([]byte{})
+	namePack := packName(self.Hdr.Name, names, off)
+	buf.Write(namePack)
+	off += 10 + len(namePack)
 
-    cnamePack := packName(self.CNAME, names, off)
+	cnamePack := packName(self.CNAME, names, off)
 
-    self.Hdr.Rdlength = uint16(len(cnamePack))
+	self.Hdr.Rdlength = uint16(len(cnamePack))
 
-    var data = []interface{} {
-        self.Hdr.Rrtype,
-        self.Hdr.Class,
-        self.Hdr.Ttl,
-        self.Hdr.Rdlength,
+	var data = []interface{}{
+		self.Hdr.Rrtype,
+		self.Hdr.Class,
+		self.Hdr.Ttl,
+		self.Hdr.Rdlength,
+	}
+
+	for _, v := range data {
+		binary.Write(buf, binary.BigEndian, v)
+	}
+
+	buf.Write(cnamePack)
+	return buf.Bytes(), nil
+}
+
+func (self *dnsRR_CNAME) setRdata(data interface{}) error {
+
+    switch v := data.(type) {
+    case string:
+        self.CNAME = v
+    case []byte:
+        self.CNAME = string(v)
+    default:
+        return fmt.Errorf("Unsupported type")
     }
+    return nil
 
-    for _, v := range data {
-        binary.Write(buf, binary.BigEndian, v)
-    }
-
-    buf.Write(cnamePack)
-    return buf.Bytes(), nil
 }
 
 //NS
 type dnsRR_NS struct {
 	dnsRR_unknown
 	NS string
+}
+
+func (self *dnsRR_NS) Rdata() interface{} {
+    return self.NS
 }
 
 func (self *dnsRR_NS) unpackRdata(msg []byte, off int) {
@@ -209,31 +304,44 @@ func (self *dnsRR_NS) String() string {
 		header.Name, header.Ttl, header.Class, self.NS)
 }
 
-func (self *dnsRR_NS) Pack(names map[string] int, off int) ([]byte, error) {
-    buf := bytes.NewBuffer([]byte{})
-    namePack := packName(self.Hdr.Name, names, off)
-    buf.Write(namePack)
-    off += 10 + len(namePack)
+func (self *dnsRR_NS) Pack(names map[string]int, off int) ([]byte, error) {
+	buf := bytes.NewBuffer([]byte{})
+	namePack := packName(self.Hdr.Name, names, off)
+	buf.Write(namePack)
+	off += 10 + len(namePack)
 
-    nsPack := packName(self.NS, names, off)
+	nsPack := packName(self.NS, names, off)
 
-    self.Hdr.Rdlength = uint16(len(nsPack))
+	self.Hdr.Rdlength = uint16(len(nsPack))
 
-    var data = []interface{} {
-        self.Hdr.Rrtype,
-        self.Hdr.Class,
-        self.Hdr.Ttl,
-        self.Hdr.Rdlength,
-    }
+	var data = []interface{}{
+		self.Hdr.Rrtype,
+		self.Hdr.Class,
+		self.Hdr.Ttl,
+		self.Hdr.Rdlength,
+	}
 
-    for _, v := range data {
-        binary.Write(buf, binary.BigEndian, v)
-    }
+	for _, v := range data {
+		binary.Write(buf, binary.BigEndian, v)
+	}
 
-    buf.Write(nsPack)
-    return buf.Bytes(), nil
+	buf.Write(nsPack)
+	return buf.Bytes(), nil
 }
 
+func (self *dnsRR_NS) setRdata(data interface{}) error {
+
+    switch v := data.(type) {
+    case string:
+        self.NS = v
+    case []byte:
+        self.NS = string(v)
+    default:
+        return fmt.Errorf("Unsupported type")
+    }
+    return nil
+
+}
 
 //OPT
 type dnsRR_OPT struct {
@@ -251,13 +359,11 @@ func (self *dnsRR_OPT) unpackRdata(msg []byte, off int) {
 	self.rawRdata = msg[off:]
 }
 
-
-func (self *dnsRR_OPT) Pack(names map[string] int, off int) ([]byte, error) {
-    buf, _ := self.Hdr.Pack(names, off)
-    buf.Write(self.rawRdata)
-    return buf.Bytes(), nil
+func (self *dnsRR_OPT) Pack(names map[string]int, off int) ([]byte, error) {
+	buf, _ := self.Hdr.Pack(names, off)
+	buf.Write(self.rawRdata)
+	return buf.Bytes(), nil
 }
-
 
 func unpackRR(msg []byte, off int) (rr dnsRR, next int, err error) {
 	i := off
@@ -279,4 +385,31 @@ func unpackRR(msg []byte, off int) (rr dnsRR, next int, err error) {
 	rr.setHeader(header)
 	rr.unpackRdata(msg[:next], i)
 	return rr, next, nil
+}
+
+func newRR(name string, rrtype int, ttl int, data interface{}) (dnsRR, error) {
+	header := new(dnsRR_Header)
+	header.Name = name
+	header.Rrtype = uint16(rrtype)
+	header.Class = dnsClassINET
+
+	var rr dnsRR
+	mk, known := rr_mk[int(header.Rrtype)]
+
+	if !known {
+		rr = new(dnsRR_unknown)
+		//rr.s
+	} else {
+		rr = mk()
+	}
+
+    err := rr.setRdata(data)
+
+    if err != nil {
+        return nil, err
+    }
+
+    rr.setHeader(header)
+
+	return rr, nil
 }
