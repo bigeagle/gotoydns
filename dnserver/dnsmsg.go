@@ -209,12 +209,12 @@ func (self *dnsMsg) String() string {
 		s += a.String() + "\n"
 	}
 
-	s += fmt.Sprintf("%d Authorities:\n", len(self.answer))
+	s += fmt.Sprintf("%d Authorities:\n", len(self.ns))
 	for _, a := range self.ns {
 		s += a.String() + "\n"
 	}
 
-	s += fmt.Sprintf("%d Additional:\n", len(self.answer))
+	s += fmt.Sprintf("%d Additional:\n", len(self.extra))
 	for _, a := range self.extra {
 		s += a.String() + "\n"
 	}

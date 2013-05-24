@@ -3,7 +3,6 @@ package toydns
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"net"
 )
@@ -14,6 +13,7 @@ var rr_mk = map[int]func() dnsRR{
 	dnsTypeA:     func() dnsRR { return new(dnsRR_A) },
 	dnsTypeAAAA:  func() dnsRR { return new(dnsRR_AAAA) },
     dnsTypeNS:    func() dnsRR { return new(dnsRR_NS) },
+    dnsTypeOPT:    func() dnsRR { return new(dnsRR_OPT) },
 }
 
 type dnsRR interface {
@@ -95,7 +95,7 @@ func (self *dnsRR_unknown) unpackRdata(msg []byte, off int) {
 func (self *dnsRR_unknown) Pack(names map[string] int, off int) ([]byte, error) {
     buf, _ := self.Hdr.Pack(names, off)
     buf.Write(self.rawRdata)
-    return buf.Bytes(), errors.New("unknown RR type")
+    return buf.Bytes(), fmt.Errorf("unknown RR type: %d", self.Hdr.Rrtype)
 }
 
 //A
@@ -231,6 +231,30 @@ func (self *dnsRR_NS) Pack(names map[string] int, off int) ([]byte, error) {
     }
 
     buf.Write(nsPack)
+    return buf.Bytes(), nil
+}
+
+
+//OPT
+type dnsRR_OPT struct {
+	dnsRR_unknown
+	rawRdata []byte
+}
+
+func (self *dnsRR_OPT) String() string {
+	header := self.Hdr
+	return fmt.Sprintf("{name: %s, TTL: %d, class: %d, type: OPT, rdata: % x}",
+		header.Name, header.Ttl, header.Class, self.rawRdata)
+}
+
+func (self *dnsRR_OPT) unpackRdata(msg []byte, off int) {
+	self.rawRdata = msg[off:]
+}
+
+
+func (self *dnsRR_OPT) Pack(names map[string] int, off int) ([]byte, error) {
+    buf, _ := self.Hdr.Pack(names, off)
+    buf.Write(self.rawRdata)
     return buf.Bytes(), nil
 }
 

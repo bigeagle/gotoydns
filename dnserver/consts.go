@@ -20,6 +20,7 @@ const (
 	dnsTypeTXT   = 16
 	dnsTypeAAAA  = 28
 	dnsTypeSRV   = 33
+    dnsTypeOPT   = 41
 
 	// valid dnsQuestion.qtype only
 	dnsTypeAXFR  = 252
