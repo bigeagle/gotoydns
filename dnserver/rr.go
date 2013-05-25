@@ -157,7 +157,7 @@ func (self *dnsRR_A) setRdata(data interface{}) error {
         binary.Read(buf, binary.BigEndian, &uint32Ip)
         return uint32Ip
     }
-
+    self.Hdr.Rdlength = uint16(4)
 	switch v := data.(type) {
 	case net.IP:
 		self.A = toInt32(v)
@@ -220,6 +220,7 @@ func (self *dnsRR_AAAA) setRdata(data interface{}) error {
 			}
 		}
 	}
+    self.Hdr.Rdlength = uint16(16)
 	return fmt.Errorf("Unsupported type")
 }
 
@@ -390,6 +391,7 @@ func unpackRR(msg []byte, off int) (rr dnsRR, next int, err error) {
 func newRR(name string, rrtype int, ttl int, data interface{}) (dnsRR, error) {
 	header := new(dnsRR_Header)
 	header.Name = name
+    header.Ttl = uint32(ttl)
 	header.Rrtype = uint16(rrtype)
 	header.Class = dnsClassINET
 
@@ -403,13 +405,14 @@ func newRR(name string, rrtype int, ttl int, data interface{}) (dnsRR, error) {
 		rr = mk()
 	}
 
+    rr.setHeader(header)
+
     err := rr.setRdata(data)
 
     if err != nil {
         return nil, err
     }
 
-    rr.setHeader(header)
 
 	return rr, nil
 }

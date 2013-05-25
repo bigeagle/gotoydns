@@ -28,18 +28,21 @@ type DNSServer struct {
     r *random
     cltMap map[uint16] *dnsClient
     upchan chan []byte
+    rdb *domainDB
     //upstream *net.UDPConn
 }
 
-func NewServer(port string, upstream string, _log logger) *DNSServer {
+func NewServer(port string, upstream string, recordfile string, _log logger) (*DNSServer, error) {
     dns := &DNSServer{}
     log = _log
-    dns.initServer(port, upstream)
-    return dns
+    if err := dns.initServer(port, upstream, recordfile); err != nil {
+        return nil, err
+    }
+    return dns, nil
 }
 
 
-func (self *DNSServer) initServer(port string, upstream string) error {
+func (self *DNSServer) initServer(port string, upstream string, recordfile string) error {
 
     udpAddr, err := net.ResolveUDPAddr("udp", port)
     if err != nil {
@@ -56,6 +59,15 @@ func (self *DNSServer) initServer(port string, upstream string) error {
     if log != nil {
         log.Info("Start Listening on port %s", port)
     }
+
+    self.rdb = nil
+    if recordfile != "" {
+        db, err := readRecordsFile(recordfile)
+        if err == nil {
+            self.rdb = db
+        }
+    }
+
 
     r := new(random)
     r.R = rand.New(rand.NewSource(time.Now().Unix()))
@@ -87,7 +99,28 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
         log.Debug(clientAddr.String())
     }
 
+    //try local look up first
+    dnsq := new(dnsMsg)
+    dnsq.Unpack(msg, 0)
 
+    dnsmsg, _ := dnsq.Reply()
+
+    log.Debug(dnsmsg.question[0].Name)
+    if len(dnsmsg.question) == 1 && self.rdb != nil {
+        q := dnsmsg.question[0]
+        ans := make([]dnsRR, 0, 10)
+        found := queryDB(q.Name, int(q.Qtype), self.rdb, &ans)
+        if found {
+            dnsmsg.answer = ans
+            pack, _ := dnsmsg.Pack()
+            log.Debug(dnsmsg.String())
+            self.udpConn.WriteTo(pack, clientAddr)
+            return
+        }
+    }
+
+
+    // give it to upstream
     qid := uint16(msg[0]) << 8 + uint16(msg[1])
     rid := self.r.Uint16()
 
@@ -99,6 +132,7 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
     if log != nil {
         log.Debug("qid: %d, rid: %d", qid, rid)
     }
+
 
     self.upchan <- msg
 }
@@ -114,13 +148,7 @@ func (self *DNSServer) handleUpstream(upstream string) {
             buf := make([]byte, 2048)
             n, _ := upConn.Read(buf)
             msg := buf[:n]
-
-            dnsmsg := new(dnsMsg)
-            dnsmsg.Unpack(msg, 0)
-
-            log.Debug(dnsmsg.String())
-            pack, _ := dnsmsg.Pack()
-            localchan <- pack
+            localchan <- msg
         }
     }(upsockchan)
 

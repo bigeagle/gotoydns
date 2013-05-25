@@ -115,6 +115,9 @@ func readRecords(rd io.Reader) (*domainDB, error) {
 				rrtype = dnsTypeAAAA
 			case "CNAME":
 				rrtype = dnsTypeCNAME
+                if !strings.HasSuffix(rdata, ".") {
+                    rdata += "."
+                }
 			default:
 				return nil, fmt.Errorf("unsported record type: %s", srtype)
 			}
@@ -183,7 +186,12 @@ func queryDB (qname string, qtype int, db *domainDB, ans *[]dnsRR) (found bool) 
         _rr, _found := nrquery(dkey, record, dnsTypeCNAME)
         if _found {
             *ans = append(*ans, _rr)
-            return queryDB(_rr.Rdata().(string), qtype, db, ans)
+
+            cname := _rr.Rdata().(string)
+            if !strings.HasSuffix(cname, ".") {
+                cname += "."
+            }
+            return queryDB(cname, qtype, db, ans)
         }
         return false
     }

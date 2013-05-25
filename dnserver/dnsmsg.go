@@ -195,6 +195,28 @@ func (self *dnsMsg) Unpack(msg []byte, off int) (next int, err error) {
 	return len(msg), nil
 }
 
+func (self *dnsMsg) Reply() (*dnsMsg, error) {
+    rep := new(dnsMsg)
+
+    rep.id = self.id
+    rep.authoritative = self.authoritative
+    rep.opcode = self.opcode
+    rep.rcode = self.rcode
+    rep.recursion_available = true
+    rep.recursion_desired = self.recursion_desired
+    rep.response = true
+    rep.truncated = false
+
+    rep.question = self.question
+
+    self.answer = make([]dnsRR, 0, 1)
+	self.ns = make([]dnsRR, 0, 0)
+	self.extra = make([]dnsRR, 0, 0)
+
+    return rep, nil
+}
+
+
 func (self *dnsMsg) String() string {
 	s := "DNS: \n"
 	s += "Header: "

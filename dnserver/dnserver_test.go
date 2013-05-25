@@ -29,7 +29,7 @@ func Test_rr_new(t *testing.T) {
 
 
 func Test_rr_read(t *testing.T) {
-    recordString := "thunics.org # domain\n" +
+    recordString := "thunics.org. # domain\n" +
         "@       A       600  10.137.1.1\n" +
         "db3     CNAME   600  srv3.thunics.org\n" +
         "srv3    A       600  10.137.2.3"
@@ -45,15 +45,15 @@ func Test_rr_read(t *testing.T) {
         }
     }
 
-    fmt.Println(matchQuery("db3.thunics.org", db))
-    fmt.Println(matchQuery("thunics.org", db))
+    fmt.Println(matchQuery("db3.thunics.org.", db))
+    fmt.Println(matchQuery("thunics.org.", db))
 
     if err != nil {
         t.Error("error reading record file:", err)
     }
 
     ans := make([]dnsRR, 0, 10)
-    queryDB("db3.thunics.org", dnsTypeA, db, &ans)
+    queryDB("db3.thunics.org.", dnsTypeA, db, &ans)
     //fmt.Println(n, len(ans))
     for _, rr := range ans {
         //fmt.Println(i)
