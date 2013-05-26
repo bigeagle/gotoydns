@@ -30,6 +30,9 @@ func (self *dnsCache) Get(qname string, qtype int) ([]byte, bool) {
         nowts := time.Now().Unix()
         if nowts - item.ts >= int64(item.ttl) {
             delete(self.cache, key)
+            if log != nil {
+                log.Debug("Ttl expired")
+            }
             return nil, false
         }
         return item.pack, true

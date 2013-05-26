@@ -77,7 +77,9 @@ func (self *dnsMsg) Pack() ([]byte, error) {
 
     for _, q := range self.question {
         if pack, err := q.Pack(self.names, off); err != nil {
-            log.Debug("%s", err)
+            if log != nil {
+                log.Error(err.Error())
+            }
         } else {
             body.Write(pack)
             off += len(pack)
@@ -87,7 +89,9 @@ func (self *dnsMsg) Pack() ([]byte, error) {
     for _, a := range self.answer {
         //log.Debug(a.String())
         if pack, err := a.Pack(self.names, off); err != nil {
-            log.Debug("%s", err)
+            if log != nil {
+                log.Error(err.Error())
+            }
         } else {
             body.Write(pack)
             off += len(pack)
@@ -98,7 +102,9 @@ func (self *dnsMsg) Pack() ([]byte, error) {
     for _, n := range self.ns {
         //log.Debug(n.String())
         if pack, err := n.Pack(self.names, off); err != nil {
-            log.Debug("%s", err)
+            if log != nil {
+                log.Error(err.Error())
+            }
         } else {
             body.Write(pack)
             off += len(pack)
@@ -109,7 +115,9 @@ func (self *dnsMsg) Pack() ([]byte, error) {
     for _, e := range self.extra {
         //log.Debug(n.String())
         if pack, err := e.Pack(self.names, off); err != nil {
-            log.Debug("%s", err)
+            if log != nil {
+                log.Error(err.Error())
+            }
         } else {
             body.Write(pack)
             off += len(pack)

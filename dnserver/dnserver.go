@@ -98,14 +98,11 @@ func (self *DNSServer) ServeForever() error {
 
 func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
 
-    if log != nil {
-        log.Debug(clientAddr.String())
-    }
-
     dnsq := new(dnsMsg)
     dnsq.Unpack(msg, 0)
-    log.Debug(dnsq.question[0].Name)
-
+    if log != nil {
+        log.Debug("Query %s from %s", dnsq.question[0].Name, clientAddr.String())
+    }
     qid := dnsq.id
 
     //try cache
@@ -113,7 +110,9 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
     if found {
         cpack[0] = byte(qid >> 8)
         cpack[1] = byte(qid)
-        log.Debug("Cache hit")
+        if log != nil {
+            log.Debug("Cache hit")
+        }
         self.udpConn.WriteTo(cpack, clientAddr)
         return
     }
@@ -127,7 +126,9 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
         if found {
             dnsmsg.answer = ans
             pack, _ := dnsmsg.Pack()
-            log.Debug(dnsmsg.String())
+            if log != nil {
+                log.Debug(dnsmsg.String())
+            }
             self.udpConn.WriteTo(pack, clientAddr)
             self.cache.Insert(q.Name, int(q.Qtype), pack, int(ans[0].Header().Ttl))
             return
