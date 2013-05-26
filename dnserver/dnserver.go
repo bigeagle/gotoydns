@@ -29,6 +29,7 @@ type DNSServer struct {
     cltMap map[uint16] *dnsClient
     upchan chan []byte
     rdb *domainDB
+    cache *dnsCache
     //upstream *net.UDPConn
 }
 
@@ -68,6 +69,8 @@ func (self *DNSServer) initServer(port string, upstream string, recordfile strin
         }
     }
 
+    self.cache = newDNSCache()
+
 
     r := new(random)
     r.R = rand.New(rand.NewSource(time.Now().Unix()))
@@ -99,13 +102,24 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
         log.Debug(clientAddr.String())
     }
 
-    //try local look up first
     dnsq := new(dnsMsg)
     dnsq.Unpack(msg, 0)
+    log.Debug(dnsq.question[0].Name)
 
+    qid := dnsq.id
+
+    //try cache
+    cpack, found := self.cache.Get(dnsq.question[0].Name, int(dnsq.question[0].Qtype))
+    if found {
+        cpack[0] = byte(qid >> 8)
+        cpack[1] = byte(qid)
+        log.Debug("Cache hit")
+        self.udpConn.WriteTo(cpack, clientAddr)
+        return
+    }
+
+    //try local look up
     dnsmsg, _ := dnsq.Reply()
-
-    log.Debug(dnsmsg.question[0].Name)
     if len(dnsmsg.question) == 1 && self.rdb != nil {
         q := dnsmsg.question[0]
         ans := make([]dnsRR, 0, 10)
@@ -115,13 +129,12 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
             pack, _ := dnsmsg.Pack()
             log.Debug(dnsmsg.String())
             self.udpConn.WriteTo(pack, clientAddr)
+            self.cache.Insert(q.Name, int(q.Qtype), pack, int(ans[0].Header().Ttl))
             return
         }
     }
 
-
     // give it to upstream
-    qid := uint16(msg[0]) << 8 + uint16(msg[1])
     rid := self.r.Uint16()
 
     self.cltMap[rid] = &dnsClient{addr: clientAddr, dq_id: qid}
@@ -171,6 +184,18 @@ func (self *DNSServer) handleUpstream(upstream string) {
                 if log != nil {
                     log.Debug("rid: %d, qid: %d", rid, qid)
                 }
+
+                go func(msg []byte) {
+                    dnsmsg := new(dnsMsg)
+                    dnsmsg.Unpack(msg, 0)
+                    q := dnsmsg.question[0]
+                    if len(dnsmsg.answer) > 0 {
+                        self.cache.Insert(
+                            q.Name, int(q.Qtype), msg,
+                            int(dnsmsg.answer[0].Header().Ttl))
+                    }
+                }(upMsg)
+
 
                 self.udpConn.WriteTo(upMsg, client.addr)
         }
