@@ -1,0 +1,5 @@
+/gotoydns
+/dnserver/_dnsmsg.go
+*.test
+*.swp
+*~
