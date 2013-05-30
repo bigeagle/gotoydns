@@ -99,9 +99,12 @@ func (self *DNSServer) ServeForever() error {
 func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
 
     dnsq := new(dnsMsg)
-    dnsq.Unpack(msg, 0)
-    if log != nil {
-        log.Debug("Query %s from %s", dnsq.question[0].Name, clientAddr.String())
+    _, err := dnsq.Unpack(msg, 0)
+    if err != nil {
+        if log != nil {
+            log.Error(err.Error())
+        }
+        return
     }
     qid := dnsq.id
 
@@ -111,10 +114,20 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
         cpack[0] = byte(qid >> 8)
         cpack[1] = byte(qid)
         if log != nil {
-            log.Debug("Cache hit")
+            log.Info("Query %s[%s] from %s [HIT]",
+                dnsq.question[0].Name,
+                dnsTypeString(dnsq.question[0].Qtype),
+                clientAddr.String())
         }
         self.udpConn.WriteTo(cpack, clientAddr)
         return
+    }
+
+    if log != nil {
+        log.Info("Query %s[%s] from %s [MISS]",
+            dnsq.question[0].Name,
+            dnsTypeString(dnsq.question[0].Qtype),
+            clientAddr.String())
     }
 
     //try local look up
@@ -173,9 +186,15 @@ func (self *DNSServer) handleUpstream(upstream string) {
                 upConn.Write(cltMsg)
 
             case upMsg := <-upsockchan:
+                if len(upMsg) < 12 {
+                    continue
+                }
                 rid := uint16(upMsg[0]) << 8 + uint16(upMsg[1])
 
-                client := self.cltMap[rid]
+                client, ok := self.cltMap[rid]
+                if !ok {
+                    continue
+                }
                 delete(self.cltMap, rid)
 
                 qid := client.dq_id
@@ -186,14 +205,30 @@ func (self *DNSServer) handleUpstream(upstream string) {
                     log.Debug("rid: %d, qid: %d", rid, qid)
                 }
 
+                // insert to cache
                 go func(msg []byte) {
                     dnsmsg := new(dnsMsg)
-                    dnsmsg.Unpack(msg, 0)
+                    _, err := dnsmsg.Unpack(msg, 0)
+                    if err != nil {
+                        if log != nil {
+                            log.Error(err.Error())
+                        }
+                        return
+                    }
                     q := dnsmsg.question[0]
                     if len(dnsmsg.answer) > 0 {
+                        if log != nil {
+                            log.Debug("%s:%d", q.Name, q.Qtype)
+                        }
                         self.cache.Insert(
                             q.Name, int(q.Qtype), msg,
                             int(dnsmsg.answer[0].Header().Ttl))
+                    } else {
+                        if log != nil {
+                            log.Debug(dnsmsg.String())
+                        }
+                        self.cache.Insert(
+                            q.Name, int(q.Qtype), msg, 600)
                     }
                 }(upMsg)
 

@@ -53,3 +53,33 @@ const (
 	_RA = 1 << 7  // recursion available
 )
 
+var _dnsTypeString map[uint16]string = map[uint16]string{
+    uint16(1): "A",
+    uint16(2): "NS",
+    uint16(3): "MD",
+    uint16(4): "MF",
+    uint16(5): "CNAME",
+    uint16(6): "SOA",
+    uint16(7): "MB",
+    uint16(8): "MG",
+    uint16(9): "MR",
+    uint16(10): "NULL",
+    uint16(11): "WKS",
+    uint16(12): "PTR",
+    uint16(13): "HINFO",
+    uint16(14): "MINFO",
+    uint16(15): "MX",
+    uint16(16): "TXT",
+    uint16(28): "AAAA",
+    uint16(33): "SRV",
+    uint16(41): "OPT",
+}
+
+func dnsTypeString(dnstype uint16) string {
+    s, ok := _dnsTypeString[dnstype]
+    if ok {
+        return s
+    } else {
+        return "UNKNOWN"
+    }
+}

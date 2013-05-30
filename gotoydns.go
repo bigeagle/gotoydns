@@ -5,7 +5,7 @@ import (
     stdlog "log"
     "flag"
     "strings"
-    "github.com/op/go-logging"
+    "github.com/bigeagle/go-logging"
     "github.com/bigeagle/gotoydns/dnserver"
 )
 

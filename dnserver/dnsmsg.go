@@ -185,18 +185,27 @@ func (self *dnsMsg) Unpack(msg []byte, off int) (next int, err error) {
 	for i := uint16(0); i < dh.Ancount; i++ {
 		var ans dnsRR
 		ans, off, err = unpackRR(msg, off)
+        if err != nil {
+            return len(msg), err
+        }
 		self.answer = append(self.answer, ans)
 	}
 
 	for i := uint16(0); i < dh.Nscount; i++ {
 		var ns dnsRR
 		ns, off, err = unpackRR(msg, off)
+        if err != nil {
+            return len(msg), err
+        }
 		self.ns = append(self.ns, ns)
 	}
 
 	for i := uint16(0); i < dh.Arcount; i++ {
 		var ex dnsRR
 		ex, off, err = unpackRR(msg, off)
+        if err != nil {
+            return len(msg), err
+        }
 		self.extra = append(self.extra, ex)
 	}
 
