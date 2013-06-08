@@ -5,9 +5,13 @@ import (
     "errors"
     "time"
     "math/rand"
+    "github.com/howeyc/fsnotify"
+    "sync"
 )
 
 var log logger
+
+var _rdblock sync.RWMutex
 
 type dnsClient struct {
     addr net.Addr
@@ -63,10 +67,50 @@ func (self *DNSServer) initServer(port string, upstream string, recordfile strin
 
     self.rdb = nil
     if recordfile != "" {
-        db, err := readRecordsFile(recordfile)
-        if err == nil {
-            self.rdb = db
+
+        fatal := func(err error) {
+            if log != nil {
+                log.Fatal(err)
+            }
         }
+
+        readDB := func() {
+            db, err := readRecordsFile(recordfile)
+            if err == nil {
+                _rdblock.Lock()
+                self.rdb = db
+                _rdblock.Unlock()
+            }
+        }
+        readDB()
+
+        //Watch record file modify and update record db
+        watcher, err := fsnotify.NewWatcher()
+        if err != nil {
+            fatal(err)
+            return err
+        }
+
+        err = watcher.Watch(recordfile)
+        if err != nil {
+            fatal(err)
+            return err
+        }
+        go func() {
+            for {
+                select {
+                case ev := <-watcher.Event:
+                    if ev.IsModify() {
+                        readDB()
+                        if log != nil {
+                            log.Info("record file updated")
+                        }
+                    }
+                case err := <-watcher.Error:
+                    fatal(err)
+                }
+            }
+        }()
     }
 
     self.cache = newDNSCache()
@@ -135,7 +179,9 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
     if len(dnsmsg.question) == 1 && self.rdb != nil {
         q := dnsmsg.question[0]
         ans := make([]dnsRR, 0, 10)
+        _rdblock.RLock()
         found := queryDB(q.Name, int(q.Qtype), self.rdb, &ans)
+        _rdblock.RUnlock()
         if found {
             dnsmsg.answer = ans
             pack, _ := dnsmsg.Pack()
@@ -228,7 +274,7 @@ func (self *DNSServer) handleUpstream(upstream string) {
                             log.Debug(dnsmsg.String())
                         }
                         self.cache.Insert(
-                            q.Name, int(q.Qtype), msg, 600)
+                            q.Name, int(q.Qtype), msg, 10)
                     }
                 }(upMsg)
 
