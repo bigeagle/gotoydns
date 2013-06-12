@@ -1,12 +1,12 @@
 package main
 
 import (
-    "os"
-    stdlog "log"
     "flag"
-    "strings"
     "github.com/bigeagle/go-logging"
     "github.com/bigeagle/gotoydns/dnserver"
+    stdlog "log"
+    "os"
+    "strings"
 )
 
 var port string
@@ -14,7 +14,6 @@ var upstream string
 var recordfile string
 var debugMode bool
 var logger = logging.MustGetLogger("toydnsd")
-
 
 func initLogging() {
 
@@ -52,7 +51,6 @@ func main() {
     initLogging()
 
     //logger.Debug(port)
-
 
     dnserver, err := toydns.NewServer(port, upstream, recordfile, logger)
     if err != nil {

@@ -7,69 +7,69 @@
 package toydns
 
 import (
-	"bytes"
-	"encoding/binary"
-	"errors"
-	"fmt"
+    "bytes"
+    "encoding/binary"
+    "errors"
+    "fmt"
     "strings"
 )
 
 type dnsHeader struct {
-	Id                                 uint16
-	Bits                               uint16
-	Qdcount, Ancount, Nscount, Arcount uint16
+    Id                                 uint16
+    Bits                               uint16
+    Qdcount, Ancount, Nscount, Arcount uint16
 }
 
 func (self *dnsHeader) Unpack(msg []byte, off int) (next int, err error) {
-	buf := bytes.NewBuffer(msg[off : off+12])
-	err = binary.Read(buf, binary.BigEndian, self)
-	if err != nil {
-		return len(msg), err
-	} else {
-		return 12, nil
-	}
+    buf := bytes.NewBuffer(msg[off : off+12])
+    err = binary.Read(buf, binary.BigEndian, self)
+    if err != nil {
+        return len(msg), err
+    } else {
+        return 12, nil
+    }
 }
 
 func (self *dnsHeader) Pack() ([]byte, error) {
-	buf := new(bytes.Buffer)
-	err := binary.Write(buf, binary.BigEndian, self)
-	return buf.Bytes(), err
+    buf := new(bytes.Buffer)
+    err := binary.Write(buf, binary.BigEndian, self)
+    return buf.Bytes(), err
 }
 
 type dnsMsgHeader struct {
-	id                  uint16
-	response            bool
-	opcode              int
-	authoritative       bool
-	truncated           bool
-	recursion_desired   bool
-	recursion_available bool
-	rcode               int
+    id                  uint16
+    response            bool
+    opcode              int
+    authoritative       bool
+    truncated           bool
+    recursion_desired   bool
+    recursion_available bool
+    rcode               int
 }
 
 func (self *dnsMsgHeader) String() string {
-	return fmt.Sprintf(
-		"{id: %d, response: %t, opcode: %d, authoritative: %t, "+
-			"truncated: %t, RD: %t, RA: %t, rcode: %d}",
-		self.id, self.response, self.opcode, self.authoritative, self.truncated,
-		self.recursion_desired, self.recursion_available, self.rcode)
+    return fmt.Sprintf(
+        "{id: %d, response: %t, opcode: %d, authoritative: %t, "+
+            "truncated: %t, RD: %t, RA: %t, rcode: %d}",
+        self.id, self.response, self.opcode, self.authoritative, self.truncated,
+        self.recursion_desired, self.recursion_available, self.rcode)
 }
 
 type dnsMsg struct {
-	dnsMsgHeader
-	question []dnsQuestion
-	answer   []dnsRR
-	ns       []dnsRR
-	extra    []dnsRR
-    names    map[string] int //map name -> offset
+    dnsMsgHeader
+    question []dnsQuestion
+    answer   []dnsRR
+    ns       []dnsRR
+    extra    []dnsRR
+    names    map[string]int //map name -> offset
 }
 
 func (self *dnsMsg) Pack() ([]byte, error) {
     var buf, body bytes.Buffer
-	var dh dnsHeader
+    var dh dnsHeader
 
     if self.names == nil {
-        self.names = make(map[string] int)
+        self.names = make(map[string]int)
     }
 
     nans, nns, nex := 0, 0, 0
@@ -108,7 +108,7 @@ func (self *dnsMsg) Pack() ([]byte, error) {
         } else {
             body.Write(pack)
             off += len(pack)
-            nns ++
+            nns++
         }
     }
 
@@ -121,95 +121,95 @@ func (self *dnsMsg) Pack() ([]byte, error) {
         } else {
             body.Write(pack)
             off += len(pack)
-            nex ++
+            nex++
         }
     }
 
-	// Convert convenient dnsMsg into wire-like dnsHeader.
-	dh.Id = self.id
-	dh.Bits = uint16(self.opcode)<<11 | uint16(self.rcode)
-	if self.recursion_available {
-		dh.Bits |= _RA
-	}
-	if self.recursion_desired {
-		dh.Bits |= _RD
-	}
-	if self.truncated {
-		dh.Bits |= _TC
-	}
-	if self.authoritative {
-		dh.Bits |= _AA
-	}
-	if self.response {
-		dh.Bits |= _QR
-	}
+    // Convert convenient dnsMsg into wire-like dnsHeader.
+    dh.Id = self.id
+    dh.Bits = uint16(self.opcode)<<11 | uint16(self.rcode)
+    if self.recursion_available {
+        dh.Bits |= _RA
+    }
+    if self.recursion_desired {
+        dh.Bits |= _RD
+    }
+    if self.truncated {
+        dh.Bits |= _TC
+    }
+    if self.authoritative {
+        dh.Bits |= _AA
+    }
+    if self.response {
+        dh.Bits |= _QR
+    }
 
-	dh.Qdcount = uint16(len(self.question))
-	dh.Ancount = uint16(nans)
-	dh.Nscount = uint16(nns)
-	dh.Arcount = uint16(nex)
+    dh.Qdcount = uint16(len(self.question))
+    dh.Ancount = uint16(nans)
+    dh.Nscount = uint16(nns)
+    dh.Arcount = uint16(nex)
 
     dh_pack, _ := dh.Pack()
     buf.Write(dh_pack)
     buf.Write(body.Bytes())
 
-	return buf.Bytes(), nil
+    return buf.Bytes(), nil
 }
 
 func (self *dnsMsg) Unpack(msg []byte, off int) (next int, err error) {
-	var dh dnsHeader
+    var dh dnsHeader
 
-	if off, err = dh.Unpack(msg, 0); err != nil {
-		return len(msg), err
-	}
+    if off, err = dh.Unpack(msg, 0); err != nil {
+        return len(msg), err
+    }
 
-	self.id = dh.Id
-	self.response = (dh.Bits & _QR) != 0
-	self.opcode = int(dh.Bits>>11) & 0xF
-	self.authoritative = (dh.Bits & _AA) != 0
-	self.truncated = (dh.Bits & _TC) != 0
-	self.recursion_desired = (dh.Bits & _RD) != 0
-	self.recursion_available = (dh.Bits & _RA) != 0
-	self.rcode = int(dh.Bits & 0xF)
+    self.id = dh.Id
+    self.response = (dh.Bits & _QR) != 0
+    self.opcode = int(dh.Bits>>11) & 0xF
+    self.authoritative = (dh.Bits & _AA) != 0
+    self.truncated = (dh.Bits & _TC) != 0
+    self.recursion_desired = (dh.Bits & _RD) != 0
+    self.recursion_available = (dh.Bits & _RA) != 0
+    self.rcode = int(dh.Bits & 0xF)
 
-	self.question = make([]dnsQuestion, dh.Qdcount)
-	self.answer = make([]dnsRR, 0, dh.Ancount)
-	self.ns = make([]dnsRR, 0, dh.Nscount)
-	self.extra = make([]dnsRR, 0, dh.Arcount)
+    self.question = make([]dnsQuestion, dh.Qdcount)
+    self.answer = make([]dnsRR, 0, dh.Ancount)
+    self.ns = make([]dnsRR, 0, dh.Nscount)
+    self.extra = make([]dnsRR, 0, dh.Arcount)
 
-	for i := uint16(0); i < dh.Qdcount; i++ {
-		dq := &self.question[i]
-		off, err = dq.Unpack(msg, off)
-	}
+    for i := uint16(0); i < dh.Qdcount; i++ {
+        dq := &self.question[i]
+        off, err = dq.Unpack(msg, off)
+    }
 
-	for i := uint16(0); i < dh.Ancount; i++ {
-		var ans dnsRR
-		ans, off, err = unpackRR(msg, off)
+    for i := uint16(0); i < dh.Ancount; i++ {
+        var ans dnsRR
+        ans, off, err = unpackRR(msg, off)
         if err != nil {
             return len(msg), err
         }
-		self.answer = append(self.answer, ans)
-	}
+        self.answer = append(self.answer, ans)
+    }
 
-	for i := uint16(0); i < dh.Nscount; i++ {
-		var ns dnsRR
-		ns, off, err = unpackRR(msg, off)
+    for i := uint16(0); i < dh.Nscount; i++ {
+        var ns dnsRR
+        ns, off, err = unpackRR(msg, off)
         if err != nil {
             return len(msg), err
         }
-		self.ns = append(self.ns, ns)
-	}
+        self.ns = append(self.ns, ns)
+    }
 
-	for i := uint16(0); i < dh.Arcount; i++ {
-		var ex dnsRR
-		ex, off, err = unpackRR(msg, off)
+    for i := uint16(0); i < dh.Arcount; i++ {
+        var ex dnsRR
+        ex, off, err = unpackRR(msg, off)
         if err != nil {
             return len(msg), err
         }
-		self.extra = append(self.extra, ex)
-	}
+        self.extra = append(self.extra, ex)
+    }
 
-	return len(msg), nil
+    return len(msg), nil
 }
 
 func (self *dnsMsg) Reply() (*dnsMsg, error) {
@@ -227,59 +227,58 @@ func (self *dnsMsg) Reply() (*dnsMsg, error) {
     rep.question = self.question
 
     self.answer = make([]dnsRR, 0, 1)
-	self.ns = make([]dnsRR, 0, 0)
-	self.extra = make([]dnsRR, 0, 0)
+    self.ns = make([]dnsRR, 0, 0)
+    self.extra = make([]dnsRR, 0, 0)
 
     return rep, nil
 }
 
-
 func (self *dnsMsg) String() string {
-	s := "DNS: \n"
-	s += "Header: "
-	s += self.dnsMsgHeader.String() + "\n"
-	s += fmt.Sprintf("%d Questions:\n", len(self.question))
-	for _, q := range self.question {
-		s += q.String() + "\n"
-	}
+    s := "DNS: \n"
+    s += "Header: "
+    s += self.dnsMsgHeader.String() + "\n"
+    s += fmt.Sprintf("%d Questions:\n", len(self.question))
+    for _, q := range self.question {
+        s += q.String() + "\n"
+    }
 
-	s += fmt.Sprintf("%d Answers:\n", len(self.answer))
-	for _, a := range self.answer {
-		s += a.String() + "\n"
-	}
+    s += fmt.Sprintf("%d Answers:\n", len(self.answer))
+    for _, a := range self.answer {
+        s += a.String() + "\n"
+    }
 
-	s += fmt.Sprintf("%d Authorities:\n", len(self.ns))
-	for _, a := range self.ns {
-		s += a.String() + "\n"
-	}
+    s += fmt.Sprintf("%d Authorities:\n", len(self.ns))
+    for _, a := range self.ns {
+        s += a.String() + "\n"
+    }
 
-	s += fmt.Sprintf("%d Additional:\n", len(self.extra))
-	for _, a := range self.extra {
-		s += a.String() + "\n"
-	}
+    s += fmt.Sprintf("%d Additional:\n", len(self.extra))
+    for _, a := range self.extra {
+        s += a.String() + "\n"
+    }
 
-	return s
+    return s
 }
 
 // DNS queries.
 type dnsQuestion struct {
-	Name   string `net:"domain-name"` // `net:"domain-name"` specifies encoding; see packers below
-	Qtype  uint16
-	Qclass uint16
+    Name   string `net:"domain-name"` // `net:"domain-name"` specifies encoding; see packers below
+    Qtype  uint16
+    Qclass uint16
 }
 
 func (self *dnsQuestion) Unpack(msg []byte, off int) (next int, err error) {
-	i := off
-	if self.Name, i, err = unpackName(msg, i); err != nil {
-		return len(msg), err
-	}
+    i := off
+    if self.Name, i, err = unpackName(msg, i); err != nil {
+        return len(msg), err
+    }
 
-	buf := bytes.NewBuffer(msg[i : i+4])
-	binary.Read(buf, binary.BigEndian, &(self.Qtype))
-	binary.Read(buf, binary.BigEndian, &(self.Qclass))
-	next = i + 4
+    buf := bytes.NewBuffer(msg[i : i+4])
+    binary.Read(buf, binary.BigEndian, &(self.Qtype))
+    binary.Read(buf, binary.BigEndian, &(self.Qclass))
+    next = i + 4
 
-	return next, nil
+    return next, nil
 }
 
 func (self *dnsQuestion) Pack(names map[string]int, off int) (pack []byte, err error) {
@@ -294,61 +293,59 @@ func (self *dnsQuestion) Pack(names map[string]int, off int) (pack []byte, err e
     return buf.Bytes(), nil
 }
 
-
 func (self *dnsQuestion) String() string {
-	return fmt.Sprintf("{name: %s, qtype: %d, qclass: %d}", self.Name, self.Qtype, self.Qclass)
+    return fmt.Sprintf("{name: %s, qtype: %d, qclass: %d}", self.Name, self.Qtype, self.Qclass)
 }
 
-
 func unpackName(msg []byte, off int) (name string, next int, err error) {
-	name = ""
-	ptr := 0
-	i := off
-	err = errors.New("offset error")
+    name = ""
+    ptr := 0
+    i := off
+    err = errors.New("offset error")
 Loop:
-	for {
-		if i > len(msg) {
-			return "", len(msg), err
-		}
-		c := int(msg[i])
-		i++
-		switch c & 0xC0 {
-		case 0x00:
-			if c == 0x00 {
-				//name end
-				break Loop
-			}
-			if i+c > len(msg) {
-				return "", len(msg), err
-			}
-			name += string(msg[i:i+c]) + "."
-			i += c
+    for {
+        if i > len(msg) {
+            return "", len(msg), err
+        }
+        c := int(msg[i])
+        i++
+        switch c & 0xC0 {
+        case 0x00:
+            if c == 0x00 {
+                //name end
+                break Loop
+            }
+            if i+c > len(msg) {
+                return "", len(msg), err
+            }
+            name += string(msg[i:i+c]) + "."
+            i += c
 
-		// Compressed Record
-		case 0xC0:
-			if i >= len(msg) {
-				return "", len(msg), err
-			}
-			c1 := msg[i]
-			i++
-			if ptr == 0 {
-				next = i
-			}
-			if ptr++; ptr > 10 {
-				return "", len(msg), err
-			}
-			i = (c^0xC0)<<8 | int(c1)
+        // Compressed Record
+        case 0xC0:
+            if i >= len(msg) {
+                return "", len(msg), err
+            }
+            c1 := msg[i]
+            i++
+            if ptr == 0 {
+                next = i
+            }
+            if ptr++; ptr > 10 {
+                return "", len(msg), err
+            }
+            i = (c^0xC0)<<8 | int(c1)
 
-		default:
-			return "", len(msg), err
-		}
+        default:
+            return "", len(msg), err
+        }
 
-	}
+    }
 
-	if ptr == 0 {
-		next = i
-	}
-	return name, next, nil
+    if ptr == 0 {
+        next = i
+    }
+    return name, next, nil
 }
 
 func packName(name string, names map[string]int, off int) []byte {
@@ -357,7 +354,7 @@ func packName(name string, names map[string]int, off int) []byte {
     offset, found := names[name]
 
     if found {
-        binary.Write(buf, binary.BigEndian, uint16(offset) | uint16(0xC0 << 8))
+        binary.Write(buf, binary.BigEndian, uint16(offset)|uint16(0xC0<<8))
     } else {
         names[name] = off
         records := strings.Split(name, ".")

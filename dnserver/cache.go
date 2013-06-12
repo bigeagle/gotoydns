@@ -1,26 +1,26 @@
 package toydns
 
 import (
-    "time"
     "strconv"
     "sync"
+    "time"
 )
 
 type cacheItem struct {
-    ts int64
-    ttl int
+    ts   int64
+    ttl  int
     pack []byte
 }
 
 type dnsCache struct {
-    cache map[string] *cacheItem
+    cache map[string]*cacheItem
 }
 
 var _lock sync.RWMutex
 
 func newDNSCache() *dnsCache {
     dnscache := new(dnsCache)
-    dnscache.cache = make(map[string] *cacheItem, 0)
+    dnscache.cache = make(map[string]*cacheItem, 0)
     return dnscache
 }
 
@@ -29,11 +29,11 @@ func (self *dnsCache) Get(qname string, qtype int) ([]byte, bool) {
     _lock.RLock()
     item, found := self.cache[key]
     _lock.RUnlock()
-    if ! found {
+    if !found {
         return nil, false
     } else {
         nowts := time.Now().Unix()
-        if nowts - item.ts >= int64(item.ttl) {
+        if nowts-item.ts >= int64(item.ttl) {
             _lock.Lock()
             delete(self.cache, key)
             _lock.Unlock()
@@ -62,4 +62,3 @@ func (self *dnsCache) Insert(qname string, qtype int, pack []byte, ttl int) erro
         return nil
     }
 }
-

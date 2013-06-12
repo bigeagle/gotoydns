@@ -1,12 +1,12 @@
 package toydns
 
 import (
-    "net"
     "errors"
-    "time"
-    "math/rand"
     "github.com/howeyc/fsnotify"
+    "math/rand"
+    "net"
     "sync"
+    "time"
 )
 
 var log logger
@@ -14,7 +14,7 @@ var log logger
 var _rdblock sync.RWMutex
 
 type dnsClient struct {
-    addr net.Addr
+    addr  net.Addr
     dq_id uint16
 }
 
@@ -22,18 +22,17 @@ type random struct {
     R *rand.Rand
 }
 
-
 func (self *random) Uint16() uint16 {
     return uint16(self.R.Int31n(65535))
 }
 
 type DNSServer struct {
     udpConn *net.UDPConn
-    r *random
-    cltMap map[uint16] *dnsClient
-    upchan chan []byte
-    rdb *domainDB
-    cache *dnsCache
+    r       *random
+    cltMap  map[uint16]*dnsClient
+    upchan  chan []byte
+    rdb     *domainDB
+    cache   *dnsCache
     //upstream *net.UDPConn
 }
 
@@ -45,7 +44,6 @@ func NewServer(port string, upstream string, recordfile string, _log logger) (*D
     }
     return dns, nil
 }
-
 
 func (self *DNSServer) initServer(port string, upstream string, recordfile string) error {
 
@@ -115,11 +113,10 @@ func (self *DNSServer) initServer(port string, upstream string, recordfile strin
 
     self.cache = newDNSCache()
 
-
     r := new(random)
     r.R = rand.New(rand.NewSource(time.Now().Unix()))
     self.r = r
-    self.cltMap = make(map[uint16] *dnsClient)
+    self.cltMap = make(map[uint16]*dnsClient)
 
     self.upchan = make(chan []byte, 32)
 
@@ -138,7 +135,6 @@ func (self *DNSServer) ServeForever() error {
 
     return errors.New("Here should not be reached")
 }
-
 
 func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
 
@@ -206,7 +202,6 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
         log.Debug("qid: %d, rid: %d", qid, rid)
     }
 
-
     self.upchan <- msg
 }
 
@@ -216,7 +211,7 @@ func (self *DNSServer) handleUpstream(upstream string) {
 
     upsockchan := make(chan []byte, 32)
 
-    go func(localchan chan[]byte) {
+    go func(localchan chan []byte) {
         for {
             buf := make([]byte, 2048)
             n, _ := upConn.Read(buf)
@@ -225,61 +220,59 @@ func (self *DNSServer) handleUpstream(upstream string) {
         }
     }(upsockchan)
 
-
     for {
         select {
-            case cltMsg := <-self.upchan:
-                upConn.Write(cltMsg)
+        case cltMsg := <-self.upchan:
+            upConn.Write(cltMsg)
 
-            case upMsg := <-upsockchan:
-                if len(upMsg) < 12 {
-                    continue
-                }
-                rid := uint16(upMsg[0]) << 8 + uint16(upMsg[1])
+        case upMsg := <-upsockchan:
+            if len(upMsg) < 12 {
+                continue
+            }
+            rid := uint16(upMsg[0])<<8 + uint16(upMsg[1])
 
-                client, ok := self.cltMap[rid]
-                if !ok {
-                    continue
-                }
-                delete(self.cltMap, rid)
+            client, ok := self.cltMap[rid]
+            if !ok {
+                continue
+            }
+            delete(self.cltMap, rid)
 
-                qid := client.dq_id
-                upMsg[0] = byte(qid >> 8)
-                upMsg[1] = byte(qid)
+            qid := client.dq_id
+            upMsg[0] = byte(qid >> 8)
+            upMsg[1] = byte(qid)
 
-                if log != nil {
-                    log.Debug("rid: %d, qid: %d", rid, qid)
-                }
+            if log != nil {
+                log.Debug("rid: %d, qid: %d", rid, qid)
+            }
 
-                // insert to cache
-                go func(msg []byte) {
-                    dnsmsg := new(dnsMsg)
-                    _, err := dnsmsg.Unpack(msg, 0)
-                    if err != nil {
-                        if log != nil {
-                            log.Error(err.Error())
-                        }
-                        return
+            // insert to cache
+            go func(msg []byte) {
+                dnsmsg := new(dnsMsg)
+                _, err := dnsmsg.Unpack(msg, 0)
+                if err != nil {
+                    if log != nil {
+                        log.Error(err.Error())
                     }
-                    q := dnsmsg.question[0]
-                    if len(dnsmsg.answer) > 0 {
-                        if log != nil {
-                            log.Debug("%s:%d", q.Name, q.Qtype)
-                        }
-                        self.cache.Insert(
-                            q.Name, int(q.Qtype), msg,
-                            int(dnsmsg.answer[0].Header().Ttl))
-                    } else {
-                        if log != nil {
-                            log.Debug(dnsmsg.String())
-                        }
-                        self.cache.Insert(
-                            q.Name, int(q.Qtype), msg, 10)
+                    return
+                }
+                q := dnsmsg.question[0]
+                if len(dnsmsg.answer) > 0 {
+                    if log != nil {
+                        log.Debug("%s:%d", q.Name, q.Qtype)
                     }
-                }(upMsg)
+                    self.cache.Insert(
+                        q.Name, int(q.Qtype), msg,
+                        int(dnsmsg.answer[0].Header().Ttl))
+                } else {
+                    if log != nil {
+                        log.Debug(dnsmsg.String())
+                    }
+                    self.cache.Insert(
+                        q.Name, int(q.Qtype), msg, 10)
+                }
+            }(upMsg)
 
-
-                self.udpConn.WriteTo(upMsg, client.addr)
+            self.udpConn.WriteTo(upMsg, client.addr)
         }
 
     }

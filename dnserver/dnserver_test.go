@@ -27,16 +27,13 @@ func Test_rr_new(t *testing.T) {
 
 }
 
-
 func Test_rr_read(t *testing.T) {
     recordString := "thunics.org. # domain\n" +
         "@       A       600  10.137.1.1\n" +
         "db3     CNAME   600  srv3.thunics.org\n" +
         "srv3    A       600  10.137.2.3"
 
-
     db, err := readRecords(strings.NewReader(recordString))
-
 
     for k, domain := range db.domains {
         fmt.Println(k)
@@ -61,4 +58,3 @@ func Test_rr_read(t *testing.T) {
     }
 
 }
-
