@@ -213,7 +213,7 @@ func (self *DNSServer) handleUpstream(upstream string) {
 
     go func(localchan chan []byte) {
         for {
-            buf := make([]byte, 2048)
+            buf := make([]byte, 512)
             n, _ := upConn.Read(buf)
             msg := buf[:n]
             localchan <- msg
@@ -231,19 +231,7 @@ func (self *DNSServer) handleUpstream(upstream string) {
             }
             rid := uint16(upMsg[0])<<8 + uint16(upMsg[1])
 
-            client, ok := self.cltMap[rid]
-            if !ok {
-                continue
-            }
-            delete(self.cltMap, rid)
-
-            qid := client.dq_id
-            upMsg[0] = byte(qid >> 8)
-            upMsg[1] = byte(qid)
-
-            if log != nil {
-                log.Debug("rid: %d, qid: %d", rid, qid)
-            }
+            tchan := make(chan bool, 2)
 
             // insert to cache
             go func(msg []byte) {
@@ -253,8 +241,15 @@ func (self *DNSServer) handleUpstream(upstream string) {
                     if log != nil {
                         log.Error(err.Error())
                     }
+                    tchan <- true
                     return
                 }
+                if gfwPolluted(dnsmsg) {
+                    tchan <- false
+                    return
+                }
+                tchan <- true
+
                 q := dnsmsg.question[0]
                 if len(dnsmsg.answer) > 0 {
                     if log != nil {
@@ -272,7 +267,26 @@ func (self *DNSServer) handleUpstream(upstream string) {
                 }
             }(upMsg)
 
-            self.udpConn.WriteTo(upMsg, client.addr)
+            if token := <-tchan; token {
+                client, ok := self.cltMap[rid]
+
+                if !ok {
+                    continue
+                }
+
+                delete(self.cltMap, rid)
+
+                qid := client.dq_id
+                upMsg[0] = byte(qid >> 8)
+                upMsg[1] = byte(qid)
+
+                if log != nil {
+                    log.Debug("rid: %d, qid: %d", rid, qid)
+                }
+
+                self.udpConn.WriteTo(upMsg, client.addr)
+            }
+
         }
 
     }
