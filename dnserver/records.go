@@ -100,12 +100,22 @@ func readRecords(rd io.Reader) (*domainDB, error) {
             var name string
             var rrtype int
             record, srtype, sttl, rdata := tokens[0], tokens[1], tokens[2], tokens[3]
-            if record == "@" {
+            var wildcard = false
+
+            switch record {
+            case "@":
                 name = ""
-            } else {
+            case "*":
+                wildcard = true
+            default:
                 name = record + "."
             }
-            name += curDomain
+
+            if wildcard {
+                name = ""
+            } else {
+                name += curDomain
+            }
 
             switch srtype {
             case "A":
@@ -127,6 +137,7 @@ func readRecords(rd io.Reader) (*domainDB, error) {
             }
 
             rr, err := newRR(name, rrtype, ttl, rdata)
+            //log.Debug("%s %v", name, rr.Header().Rdlength)
             if err != nil {
                 return nil, err
             }
@@ -145,6 +156,8 @@ func readRecords(rd io.Reader) (*domainDB, error) {
 func matchQuery(qname string, db *domainDB) (dkey string, record string, match bool) {
 
     for dkey, drgx := range db.regexs {
+
+        //log.Debug(dkey)
         matches := drgx.FindStringSubmatch(qname)
         switch len(matches) {
         case 2:
@@ -156,7 +169,7 @@ func matchQuery(qname string, db *domainDB) (dkey string, record string, match b
             }
             return dkey, record, true
         default:
-            return "", "", false
+            continue
         }
     }
 
@@ -168,6 +181,10 @@ func queryDB(qname string, qtype int, db *domainDB, ans *[]dnsRR) (found bool) {
     nrquery := func(dkey string, record string, qtype int) (rr dnsRR, found bool) {
         rkey := rkeyGen(record, qtype)
         rr, found = db.domains[dkey].records[rkey]
+        if !found {
+            rkey := rkeyGen("*", qtype)
+            rr, found = db.domains[dkey].records[rkey]
+        }
         return rr, found
     }
 
@@ -177,7 +194,16 @@ func queryDB(qname string, qtype int, db *domainDB, ans *[]dnsRR) (found bool) {
     }
 
     rr, found := nrquery(dkey, record, qtype)
+
     if found {
+        //if log != nil {
+        //    log.Debug(rr.Header().Name)
+        //    log.Debug(qname)
+        //    log.Debug("%v", rr.Header().Rdlength)
+        //}
+        if rr.Header().Name == "" {
+            rr.Header().Name = qname
+        }
         *ans = append(*ans, rr)
     } else {
         //if CNAME is avalible

@@ -202,6 +202,8 @@ func (self *dnsRR_AAAA) Pack(names map[string]int, off int) ([]byte, error) {
 
 func (self *dnsRR_AAAA) setRdata(data interface{}) error {
 
+    self.Hdr.Rdlength = uint16(16)
+
     switch v := data.(type) {
     case net.IP:
         if len(v) == net.IPv6len {
@@ -220,7 +222,6 @@ func (self *dnsRR_AAAA) setRdata(data interface{}) error {
             }
         }
     }
-    self.Hdr.Rdlength = uint16(16)
     return fmt.Errorf("Unsupported type")
 }
 
