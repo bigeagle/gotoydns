@@ -1,0 +1,15 @@
+# you should use space to split fields, tab is not recognized
+
+examle.com. # domain
+#record    type    ttl   data
+@           A       600  127.0.0.1
+www         A       600  127.0.0.1
+www         AAAA    600  2001::1
+test        CNAME   600  www.example.com.
+
+
+# upstream servers
+cn            114.114.114.114 
+douban.fm     114.114.114.114 
+duomi.com     114.114.114.114 
+gtimg.com     114.114.114.114 
