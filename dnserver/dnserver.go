@@ -30,14 +30,18 @@ type DNSServer struct {
     udpConn *net.UDPConn
     r       *random
     cltMap  map[uint16]*dnsClient
-    upchan  chan []byte
     rdb     *domainDB
     cache   *dnsCache
     //upstream *net.UDPConn
 }
 
+var defaultUpChan = make(chan []byte, 32)
+
 func NewServer(port string, upstream string, recordfile string, _log logger) (*DNSServer, error) {
     dns := &DNSServer{}
+    if _log == nil {
+        return nil, errors.New("No logger specified")
+    }
     log = _log
     if err := dns.initServer(port, upstream, recordfile); err != nil {
         return nil, err
@@ -59,17 +63,13 @@ func (self *DNSServer) initServer(port string, upstream string, recordfile strin
 
     self.udpConn = udpConn
 
-    if log != nil {
-        log.Info("Start Listening on port %s", port)
-    }
+    log.Info("Start Listening on port %s", port)
 
     self.rdb = nil
     if recordfile != "" {
 
         fatal := func(err error) {
-            if log != nil {
-                log.Fatal(err)
-            }
+            log.Fatal(err)
         }
 
         readDB := func() {
@@ -100,9 +100,7 @@ func (self *DNSServer) initServer(port string, upstream string, recordfile strin
                 case ev := <-watcher.Event:
                     if ev.IsModify() {
                         readDB()
-                        if log != nil {
-                            log.Info("record file updated")
-                        }
+                        log.Info("record file updated")
                     }
                 case err := <-watcher.Error:
                     fatal(err)
@@ -118,9 +116,10 @@ func (self *DNSServer) initServer(port string, upstream string, recordfile strin
     self.r = r
     self.cltMap = make(map[uint16]*dnsClient)
 
-    self.upchan = make(chan []byte, 32)
-
-    go self.handleUpstream(upstream)
+    go self.handleUpstream(upstream, defaultUpChan)
+    for upaddr, uprec := range(upstreams) {
+        go self.handleUpstream(upaddr+":53", uprec.uchan)
+    }
 
     return nil
 }
@@ -137,13 +136,12 @@ func (self *DNSServer) ServeForever() error {
 }
 
 func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
+    upchan := defaultUpChan
 
     dnsq := new(dnsMsg)
     _, err := dnsq.Unpack(msg, 0)
     if err != nil {
-        if log != nil {
-            log.Error(err.Error())
-        }
+        log.Error(err.Error())
         return
     }
     qid := dnsq.id
@@ -153,22 +151,18 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
     if found {
         cpack[0] = byte(qid >> 8)
         cpack[1] = byte(qid)
-        if log != nil {
-            log.Info("Query %s[%s] from %s [HIT]",
-                dnsq.question[0].Name,
-                dnsTypeString(dnsq.question[0].Qtype),
-                clientAddr.String())
-        }
+        log.Info("Query %s[%s] from %s [HIT]",
+            dnsq.question[0].Name,
+            dnsTypeString(dnsq.question[0].Qtype),
+            clientAddr.String())
         self.udpConn.WriteTo(cpack, clientAddr)
         return
     }
 
-    if log != nil {
-        log.Info("Query %s[%s] from %s [MISS]",
-            dnsq.question[0].Name,
-            dnsTypeString(dnsq.question[0].Qtype),
-            clientAddr.String())
-    }
+    log.Info("Query %s[%s] from %s [MISS]",
+        dnsq.question[0].Name,
+        dnsTypeString(dnsq.question[0].Qtype),
+        clientAddr.String())
 
     //try local look up
     dnsmsg, _ := dnsq.Reply()
@@ -178,15 +172,19 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
         _rdblock.RLock()
         found := queryDB(q.Name, int(q.Qtype), self.rdb, &ans)
         _rdblock.RUnlock()
+
         if found {
             dnsmsg.answer = ans
             pack, _ := dnsmsg.Pack()
-            if log != nil {
-                log.Debug(dnsmsg.String())
-            }
+            log.Debug(dnsmsg.String())
             self.udpConn.WriteTo(pack, clientAddr)
             self.cache.Insert(q.Name, int(q.Qtype), pack, int(ans[0].Header().Ttl))
             return
+        } else {
+            // found upstream
+            if uchan, ok := upstreamChan(q.Name); ok {
+                upchan = uchan
+            }
         }
     }
 
@@ -198,14 +196,12 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
     msg[0] = byte(rid >> 8)
     msg[1] = byte(rid)
 
-    if log != nil {
-        log.Debug("qid: %d, rid: %d", qid, rid)
-    }
+    log.Debug("qid: %d, rid: %d", qid, rid)
 
-    self.upchan <- msg
+    upchan <- msg
 }
 
-func (self *DNSServer) handleUpstream(upstream string) {
+func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
     upAddr, _ := net.ResolveUDPAddr("udp", upstream)
     upConn, _ := net.DialUDP("udp", nil, upAddr)
 
@@ -222,7 +218,7 @@ func (self *DNSServer) handleUpstream(upstream string) {
 
     for {
         select {
-        case cltMsg := <-self.upchan:
+        case cltMsg := <-clientChan:
             upConn.Write(cltMsg)
 
         case upMsg := <-upsockchan:
@@ -238,9 +234,7 @@ func (self *DNSServer) handleUpstream(upstream string) {
                 dnsmsg := new(dnsMsg)
                 _, err := dnsmsg.Unpack(msg, 0)
                 if err != nil {
-                    if log != nil {
-                        log.Error(err.Error())
-                    }
+                    log.Error(err.Error())
                     tchan <- true
                     return
                 }
@@ -252,16 +246,12 @@ func (self *DNSServer) handleUpstream(upstream string) {
 
                 q := dnsmsg.question[0]
                 if len(dnsmsg.answer) > 0 {
-                    if log != nil {
-                        log.Debug("%s:%d", q.Name, q.Qtype)
-                    }
+                    log.Debug("%s:%d", q.Name, q.Qtype)
                     self.cache.Insert(
                         q.Name, int(q.Qtype), msg,
                         int(dnsmsg.answer[0].Header().Ttl))
                 } else {
-                    if log != nil {
-                        log.Debug(dnsmsg.String())
-                    }
+                    log.Debug(dnsmsg.String())
                     self.cache.Insert(
                         q.Name, int(q.Qtype), msg, 10)
                 }
@@ -280,9 +270,7 @@ func (self *DNSServer) handleUpstream(upstream string) {
                 upMsg[0] = byte(qid >> 8)
                 upMsg[1] = byte(qid)
 
-                if log != nil {
-                    log.Debug("rid: %d, qid: %d", rid, qid)
-                }
+                log.Debug("rid: %d, qid: %d", rid, qid)
 
                 self.udpConn.WriteTo(upMsg, client.addr)
             }

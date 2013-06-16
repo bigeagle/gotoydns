@@ -11,16 +11,29 @@ import (
     "strings"
 )
 
+// a domain and records
 type domain struct {
     name    string
     records map[string]dnsRR
 }
 
+// manage domains
 type domainDB struct {
     regexs  map[string]*regexp.Regexp //match patterns
     domains map[string]*domain
 }
 
+// an upstream
+type upstreamRecord struct {
+    domains []string
+    regex *regexp.Regexp
+    uchan chan []byte
+}
+
+// upstreams
+var upstreams = make(map[string]*upstreamRecord, 4)
+
+// generate record key
 func rkeyGen(record string, rtype int) string {
     return record + ":" + strconv.Itoa(rtype)
 }
@@ -83,6 +96,7 @@ func readRecords(rd io.Reader) (*domainDB, error) {
 
         // len 1 is domain name
         case 1:
+            //log.Debug("1: %v", tokens)
             curDomain = tokens[0]
 
             rdomain := strings.Replace(curDomain, `.`, `\.`, -1)
@@ -97,6 +111,7 @@ func readRecords(rd io.Reader) (*domainDB, error) {
 
         // len 4 is record
         case 4:
+            //log.Debug("4: %v", tokens)
             var name string
             var rrtype int
             record, srtype, sttl, rdata := tokens[0], tokens[1], tokens[2], tokens[3]
@@ -145,13 +160,39 @@ func readRecords(rd io.Reader) (*domainDB, error) {
             rkey := record + ":" + strconv.Itoa(rrtype)
             db.domains[curDomain].records[rkey] = rr
 
+        case 2:
+            // upstream
+            //log.Debug("2: %v", tokens)
+            domain, upaddr := tokens[0], tokens[1]
+            domain = strings.Replace(domain, `.`, `\.`, -1)
+            if uprec, ok := upstreams[upaddr]; ok {
+                uprec.domains = append(uprec.domains, domain)
+            } else {
+                uprec = new(upstreamRecord)
+                uprec.domains = make([]string, 0, 4)
+                uprec.domains = append(uprec.domains, domain)
+                uprec.uchan = make(chan []byte)
+                upstreams[upaddr] = uprec
+            }
+
         default:
+            log.Debug("none: %v", tokens)
             continue
         }
     }
 
+    // generate regex
+    for _, uprec := range(upstreams) {
+        rxstr :=  `^[-A-Za-z0-9.]*(`
+        rxstr += strings.Join(uprec.domains, "|")
+        rxstr += `)\.$`
+        rx := regexp.MustCompile(rxstr)
+        uprec.regex = rx
+    }
+
     return db, nil
 }
+
 
 func matchQuery(qname string, db *domainDB) (dkey string, record string, match bool) {
 
@@ -220,4 +261,15 @@ func queryDB(qname string, qtype int, db *domainDB, ans *[]dnsRR) (found bool) {
         return false
     }
     return true
+}
+
+func upstreamChan(qname string) (chan []byte, bool) {
+    for upaddr, uprec := range(upstreams) {
+        log.Debug("regex : %v", uprec.regex)
+        if uprec.regex.MatchString(qname) {
+            log.Debug("found upstream: %s %s", qname, upaddr)
+            return uprec.uchan, true
+        }
+    }
+    return nil, false
 }

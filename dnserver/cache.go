@@ -37,9 +37,7 @@ func (self *dnsCache) Get(qname string, qtype int) ([]byte, bool) {
             _lock.Lock()
             delete(self.cache, key)
             _lock.Unlock()
-            if log != nil {
-                log.Debug("Ttl expired")
-            }
+            log.Debug("Ttl expired")
             return nil, false
         }
         return item.pack, true
