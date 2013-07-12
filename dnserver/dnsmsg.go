@@ -14,6 +14,8 @@ import (
     "strings"
 )
 
+var offsetError = errors.New("offset index out of bound")
+
 type dnsHeader struct {
     Id                                 uint16
     Bits                               uint16
@@ -172,6 +174,9 @@ func (self *dnsMsg) Unpack(msg []byte, off int) (next int, err error) {
     for i := uint16(0); i < dh.Qdcount; i++ {
         dq := &self.question[i]
         off, err = dq.Unpack(msg, off)
+        if err != nil {
+            return len(msg), err
+        }
     }
 
     for i := uint16(0); i < dh.Ancount; i++ {
@@ -265,6 +270,10 @@ func (self *dnsQuestion) Unpack(msg []byte, off int) (next int, err error) {
         return len(msg), err
     }
 
+    if i+4 >= len(msg) {
+        return len(msg), offsetError
+    }
+
     buf := bytes.NewBuffer(msg[i : i+4])
     binary.Read(buf, binary.BigEndian, &(self.Qtype))
     binary.Read(buf, binary.BigEndian, &(self.Qclass))
@@ -293,11 +302,10 @@ func unpackName(msg []byte, off int) (name string, next int, err error) {
     name = ""
     ptr := 0
     i := off
-    err = errors.New("offset error")
 Loop:
     for {
-        if i > len(msg) {
-            return "", len(msg), err
+        if i >= len(msg) {
+            return "", len(msg), offsetError
         }
         c := int(msg[i])
         i++
@@ -307,8 +315,8 @@ Loop:
                 //name end
                 break Loop
             }
-            if i+c > len(msg) {
-                return "", len(msg), err
+            if i+c >= len(msg) {
+                return "", len(msg), offsetError
             }
             name += string(msg[i:i+c]) + "."
             i += c
@@ -316,7 +324,7 @@ Loop:
         // Compressed Record
         case 0xC0:
             if i >= len(msg) {
-                return "", len(msg), err
+                return "", len(msg), offsetError
             }
             c1 := msg[i]
             i++
@@ -324,12 +332,12 @@ Loop:
                 next = i
             }
             if ptr++; ptr > 10 {
-                return "", len(msg), err
+                return "", len(msg), offsetError
             }
             i = (c^0xC0)<<8 | int(c1)
 
         default:
-            return "", len(msg), err
+            return "", len(msg), offsetError
         }
 
     }

@@ -42,6 +42,10 @@ func (self *dnsRR_Header) Unpack(msg []byte, off int) (next int, err error) {
     if self.Name, i, err = unpackName(msg, i); err != nil {
         return len(msg), err
     }
+    if i+10 >= len(msg) {
+        return len(msg), offsetError
+    }
+
     buf := bytes.NewBuffer(msg[i : i+10])
 
     binary.Read(buf, binary.BigEndian, &(self.Rrtype))
@@ -385,7 +389,7 @@ func unpackRR(msg []byte, off int) (rr dnsRR, next int, err error) {
 
     next = i + int(header.Rdlength)
     rr.setHeader(header)
-    if next > len(msg) {
+    if next >= len(msg) {
         return nil, len(msg), fmt.Errorf("Rdlength %d larger than message length %d", next, len(msg))
     }
     rr.unpackRdata(msg[:next], i)
