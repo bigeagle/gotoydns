@@ -270,7 +270,7 @@ func (self *dnsQuestion) Unpack(msg []byte, off int) (next int, err error) {
         return len(msg), err
     }
 
-    if i+4 >= len(msg) {
+    if i+4 > len(msg) {
         return len(msg), offsetError
     }
 
@@ -315,7 +315,7 @@ Loop:
                 //name end
                 break Loop
             }
-            if i+c >= len(msg) {
+            if i+c > len(msg) {
                 return "", len(msg), offsetError
             }
             name += string(msg[i:i+c]) + "."

@@ -389,7 +389,7 @@ func unpackRR(msg []byte, off int) (rr dnsRR, next int, err error) {
 
     next = i + int(header.Rdlength)
     rr.setHeader(header)
-    if next >= len(msg) {
+    if next > len(msg) {
         return nil, len(msg), fmt.Errorf("Rdlength %d larger than message length %d", next, len(msg))
     }
     rr.unpackRdata(msg[:next], i)
