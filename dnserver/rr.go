@@ -42,7 +42,7 @@ func (self *dnsRR_Header) Unpack(msg []byte, off int) (next int, err error) {
     if self.Name, i, err = unpackName(msg, i); err != nil {
         return len(msg), err
     }
-    if i+10 >= len(msg) {
+    if i+10 > len(msg) {
         return len(msg), offsetError
     }
 
