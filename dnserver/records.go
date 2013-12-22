@@ -30,7 +30,7 @@ type upstreamRecord struct {
     uchan chan []byte
 }
 
-// upstreams
+// upstreams for specified domain
 var upstreams = make(map[string]*upstreamRecord, 4)
 
 // generate record key

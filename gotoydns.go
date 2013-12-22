@@ -9,7 +9,7 @@ import (
     "strings"
 )
 
-var port string
+var addr, port string
 var upstream string
 var recordfile string
 var debugMode bool
@@ -37,6 +37,7 @@ func checkError(err error) {
 }
 
 func main() {
+    flag.StringVar(&addr, "b", "", "Address to bind")
     flag.StringVar(&port, "p", "53", "DNS Server port")
     flag.StringVar(&upstream, "u", "166.111.8.28:53", "Upstream server addr:port")
     flag.StringVar(&recordfile, "r", "", "Record file")
@@ -47,6 +48,7 @@ func main() {
     if !strings.HasPrefix(port, ":") {
         port = ":" + port
     }
+    port = addr + port
 
     initLogging()
 

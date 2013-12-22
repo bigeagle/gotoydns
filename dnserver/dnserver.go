@@ -14,7 +14,7 @@ var log logger
 var _rdblock sync.RWMutex
 
 type dnsClient struct {
-    addr  net.Addr
+    addr  *net.UDPAddr
     dq_id uint16
 }
 
@@ -117,6 +117,7 @@ func (self *DNSServer) initServer(port string, upstream string, recordfile strin
     self.cltMap = make(map[uint16]*dnsClient)
 
     go self.handleUpstream(upstream, defaultUpChan)
+    // domain specific settings
     for upaddr, uprec := range(upstreams) {
         go self.handleUpstream(upaddr+":53", uprec.uchan)
     }
@@ -128,14 +129,14 @@ func (self *DNSServer) ServeForever() error {
 
     for {
         buf := make([]byte, 512)
-        n, clientAddr, _ := self.udpConn.ReadFrom(buf[0:])
+        n, clientAddr, _ := self.udpConn.ReadFromUDP(buf[0:])
         go self.handleClient(buf[:n], clientAddr)
     }
 
     return errors.New("Here should not be reached")
 }
 
-func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
+func (self *DNSServer) handleClient(msg []byte, clientAddr *net.UDPAddr) {
     upchan := defaultUpChan
 
     dnsq := new(dnsMsg)
@@ -202,15 +203,35 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr net.Addr) {
 }
 
 func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
-    upAddr, _ := net.ResolveUDPAddr("udp", upstream)
-    upConn, _ := net.DialUDP("udp", nil, upAddr)
+    var upConn *net.UDPConn
+    var err error
+
+    initUpstreamConn := func() (*net.UDPConn, error) {
+        upAddr, _ := net.ResolveUDPAddr("udp", upstream)
+        upConn, err := net.DialUDP("udp", nil, upAddr)
+        return upConn, err
+    }
+
+    upConn, err = initUpstreamConn()
+    if err != nil {
+        log.Error("Error initializing upstream connection: %s", err.Error())
+        return
+    }
 
     upsockchan := make(chan []byte, 32)
 
     go func(localchan chan []byte) {
         for {
             buf := make([]byte, 512)
-            n, _ := upConn.Read(buf)
+            n, err := upConn.Read(buf)
+            if err != nil {
+                log.Error("Error reading from upstream: %s", err.Error())
+                upConn, err = initUpstreamConn()
+                if err != nil {
+                    log.Error("Error initializing upstream connection: %s", err.Error())
+                }
+                continue
+            }
             msg := buf[:n]
             localchan <- msg
         }
@@ -219,7 +240,18 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
     for {
         select {
         case cltMsg := <-clientChan:
-            upConn.Write(cltMsg)
+            for i := 1; i < 3; i++ {
+                _, err := upConn.Write(cltMsg)
+                if err != nil {
+                    log.Error("Error writing to upstream: %s", err.Error())
+                    upConn, err = initUpstreamConn()
+                    if err != nil {
+                        log.Error("Error initializing upstream connection: %s", err.Error())
+                    }
+                } else {
+                    break
+                }
+            }
 
         case upMsg := <-upsockchan:
             if len(upMsg) < 12 {
