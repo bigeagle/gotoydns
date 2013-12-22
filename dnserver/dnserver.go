@@ -204,32 +204,39 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr *net.UDPAddr) {
 
 func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
     var upConn *net.UDPConn
-    var err error
-
-    initUpstreamConn := func() (*net.UDPConn, error) {
-        upAddr, _ := net.ResolveUDPAddr("udp", upstream)
-        upConn, err := net.DialUDP("udp", nil, upAddr)
-        return upConn, err
-    }
-
-    upConn, err = initUpstreamConn()
-    if err != nil {
-        log.Error("Error initializing upstream connection: %s", err.Error())
-        return
-    }
+    ReqCount := 0   // request counts
 
     upsockchan := make(chan []byte, 32)
+    failChan := make(chan int)
+
+    go func() {
+        var _err error
+        upAddr, _ := net.ResolveUDPAddr("udp", upstream)
+        for {
+            log.Info("Initializing Upstream Connection")
+            upConn, _err = net.DialUDP("udp", nil, upAddr)
+            if _err != nil {
+                log.Error("Error initializing upstream connection: %s", _err.Error())
+            }
+            <-failChan
+        }
+    }()
+
+    time.Sleep(1*time.Second)
 
     go func(localchan chan []byte) {
         for {
             buf := make([]byte, 512)
             n, err := upConn.Read(buf)
+            ReqCount --
+            if ReqCount == 0 {
+                upConn.SetReadDeadline(time.Now().Add(65535*time.Hour))
+            }
+
             if err != nil {
-                log.Error("Error reading from upstream: %s", err.Error())
-                upConn, err = initUpstreamConn()
-                if err != nil {
-                    log.Error("Error initializing upstream connection: %s", err.Error())
-                }
+                log.Error("Error Reading from upstream: %s", err.Error())
+                failChan <- 1
+                time.Sleep(50*time.Microsecond)
                 continue
             }
             msg := buf[:n]
@@ -237,21 +244,13 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
         }
     }(upsockchan)
 
+
     for {
         select {
         case cltMsg := <-clientChan:
-            for i := 1; i < 3; i++ {
-                _, err := upConn.Write(cltMsg)
-                if err != nil {
-                    log.Error("Error writing to upstream: %s", err.Error())
-                    upConn, err = initUpstreamConn()
-                    if err != nil {
-                        log.Error("Error initializing upstream connection: %s", err.Error())
-                    }
-                } else {
-                    break
-                }
-            }
+            upConn.Write(cltMsg)
+            ReqCount++
+            upConn.SetReadDeadline(time.Now().Add(1*time.Second))
 
         case upMsg := <-upsockchan:
             if len(upMsg) < 12 {
