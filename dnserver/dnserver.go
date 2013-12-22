@@ -215,6 +215,7 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
         for {
             log.Info("Initializing Upstream Connection")
             upConn, _err = net.DialUDP("udp", nil, upAddr)
+            ReqCount = 0
             if _err != nil {
                 log.Error("Error initializing upstream connection: %s", _err.Error())
             }
