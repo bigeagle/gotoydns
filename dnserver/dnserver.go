@@ -234,7 +234,11 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
             }
 
             if err != nil {
-                log.Error("Error Reading from upstream: %s", err.Error())
+                if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
+                    log.Warning("Upstream %s Timeout", upstream)
+                } else {
+                    log.Error("Error Reading from upstream: %s", err.Error())
+                }
                 failChan <- 1
                 time.Sleep(50*time.Microsecond)
                 continue
