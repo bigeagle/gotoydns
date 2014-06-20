@@ -15,6 +15,7 @@ var _ABlackList = []uint32{
     ip2int(37, 61, 54, 158),
     ip2int(203, 98, 7, 65),
     ip2int(93, 46, 8, 89),
+    ip2int(59, 24, 3, 173),
 }
 
 func ip2int(a, b, c, d int) uint32 {

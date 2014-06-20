@@ -7,6 +7,7 @@ import (
     "net"
     "sync"
     "time"
+    "runtime"
 )
 
 var log logger
@@ -197,7 +198,7 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr *net.UDPAddr) {
     msg[0] = byte(rid >> 8)
     msg[1] = byte(rid)
 
-    log.Debug("qid: %d, rid: %d", qid, rid)
+    log.Debug("DNS Question qid: %d, rid: %d", qid, rid)
 
     upchan <- msg
 }
@@ -208,23 +209,29 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
 
     upsockchan := make(chan []byte, 32)
     failChan := make(chan int)
+    initDone := make(chan int)
+    inited := false
+
+    reqCache := make(map[uint16]([]byte))
 
     go func() {
         var _err error
         upAddr, _ := net.ResolveUDPAddr("udp", upstream)
+        log.Info("Initializing Upstream %s", upstream)
         for {
-            log.Info("Initializing Upstream Connection")
             upConn, _err = net.DialUDP("udp", nil, upAddr)
+            inited = true
+            initDone <- 1
             ReqCount = 0
             if _err != nil {
                 log.Error("Error initializing upstream connection: %s", _err.Error())
             }
             <-failChan
+            log.Info("Re-initialize Upstream %s", upstream)
         }
     }()
 
-    time.Sleep(1*time.Second)
-
+    <-initDone
     go func(localchan chan []byte) {
         for {
             buf := make([]byte, 512)
@@ -240,8 +247,13 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
                 } else {
                     log.Error("Error Reading from upstream: %s", err.Error())
                 }
+                inited = false
                 failChan <- 1
-                time.Sleep(50*time.Microsecond)
+                <-initDone
+                for rid, msg := range reqCache {
+                    log.Debug("Retransmit req %d", rid)
+                    clientChan <- msg
+                }
                 continue
             }
             msg := buf[:n]
@@ -253,15 +265,21 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
     for {
         select {
         case cltMsg := <-clientChan:
+            for ; inited != true; {
+                runtime.Gosched()
+            }
+            rid := uint16(cltMsg[0])<<8 + uint16(cltMsg[1])
+            reqCache[rid] = cltMsg
             upConn.Write(cltMsg)
             ReqCount++
-            upConn.SetReadDeadline(time.Now().Add(1*time.Second))
+            upConn.SetReadDeadline(time.Now().Add(2*time.Second))
 
         case upMsg := <-upsockchan:
             if len(upMsg) < 12 {
                 continue
             }
             rid := uint16(upMsg[0])<<8 + uint16(upMsg[1])
+            delete(reqCache, rid)
 
             tchan := make(chan bool, 2)
 
@@ -282,7 +300,7 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
 
                 q := dnsmsg.question[0]
                 if len(dnsmsg.answer) > 0 {
-                    log.Debug("%s:%d", q.Name, q.Qtype)
+                    log.Debug("DNS Reply %s:%d", q.Name, q.Qtype)
                     self.cache.Insert(
                         q.Name, int(q.Qtype), msg,
                         int(dnsmsg.answer[0].Header().Ttl))
@@ -306,7 +324,7 @@ func (self *DNSServer) handleUpstream(upstream string, clientChan chan []byte) {
                 upMsg[0] = byte(qid >> 8)
                 upMsg[1] = byte(qid)
 
-                log.Debug("rid: %d, qid: %d", rid, qid)
+                log.Debug("DNS Reply: rid: %d, qid: %d", rid, qid)
 
                 self.udpConn.WriteTo(upMsg, client.addr)
             }
