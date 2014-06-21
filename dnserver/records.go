@@ -24,16 +24,8 @@ type domainDB struct {
 	domains map[string]*domain
 }
 
-// an upstream
-type upstreamRecord struct {
-	domains      []string
-	regex        *regexp.Regexp
-	upstreamAddr string
-	uchan        chan []byte // Deprecated
-}
-
 // upstreams for specified domain
-var upstreams = make(map[string]*upstreamRecord, 4)
+var upstreamTree *suffixTreeNode
 
 // generate record key
 func rkeyGen(record string, rtype int) string {
@@ -59,6 +51,7 @@ func readRecords(rd io.Reader) (*domainDB, error) {
 	var curDomain string
 
 	br := bufio.NewReader(rd)
+	upstreamTree = newSuffixTree("", nil)
 
 	for {
 		line, isPrefix, err1 := br.ReadLine()
@@ -166,37 +159,21 @@ func readRecords(rd io.Reader) (*domainDB, error) {
 			// upstream
 			//logger.Debug("2: %v", tokens)
 			domain, upaddr := tokens[0], tokens[1]
-			domain = strings.Replace(domain, `.`, `\.`, -1)
-			if uprec, ok := upstreams[upaddr]; ok {
-				uprec.domains = append(uprec.domains, domain)
-			} else {
-				uprec = new(upstreamRecord)
-				uprec.domains = make([]string, 0, 4)
-				uprec.domains = append(uprec.domains, domain)
-				if _, err := net.ResolveUDPAddr("udp", upaddr); err == nil {
-					uprec.upstreamAddr = upaddr
-				} else if _ip := net.ParseIP(upaddr); _ip != nil {
-					uprec.upstreamAddr = upaddr + ":53"
-				} else {
-					continue
-				}
 
-				upstreams[upaddr] = uprec
+			if _, err := net.ResolveUDPAddr("udp", upaddr); err == nil {
+				upaddr = upaddr
+			} else if _ip := net.ParseIP(upaddr); _ip != nil {
+				upaddr = upaddr + ":53"
+			} else {
+				continue
 			}
+
+			upstreamTree.sinsert(strings.Split(domain, "."), upaddr)
 
 		default:
 			logger.Debug("none: %v", tokens)
 			continue
 		}
-	}
-
-	// generate regex
-	for _, uprec := range upstreams {
-		rxstr := `^[-A-Za-z0-9.]*(`
-		rxstr += strings.Join(uprec.domains, "|")
-		rxstr += `)\.$`
-		rx := regexp.MustCompile(rxstr)
-		uprec.regex = rx
 	}
 
 	return db, nil
@@ -267,12 +244,11 @@ func queryDB(qname string, qtype int, db *domainDB, ans *[]dnsRR) (found bool) {
 }
 
 func getUpstreamAddr(qname string) (string, bool) {
-	for upaddr, uprec := range upstreams {
-		logger.Debug("regex : %v", uprec.regex)
-		if uprec.regex.MatchString(qname) {
-			logger.Debug("found upstream: %s %s", qname, upaddr)
-			return uprec.upstreamAddr, true
-		}
+	queryKeys := strings.Split(qname[:len(qname)-1], ".") // ignore last '.'
+
+	if v, found := upstreamTree.search(queryKeys); found {
+		logger.Debug("found upstream: %v", v)
+		return v.(string), true
 	}
 	return "", false
 }

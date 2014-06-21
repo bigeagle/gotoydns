@@ -172,11 +172,11 @@ func (self *DNSServer) handleClient(msg []byte, clientAddr *net.UDPAddr) {
 			self.udpConn.WriteTo(pack, clientAddr)
 			self.cache.Insert(q.Name, int(q.Qtype), pack, int(ans[0].Header().Ttl))
 			return
-		} else {
-			// found upstream
-			if uaddr, ok := getUpstreamAddr(q.Name); ok {
-				upstreamAddrs = append(upstreamAddrs, uaddr)
-			}
+		}
+
+		// found upstream
+		if uaddr, ok := getUpstreamAddr(q.Name); ok {
+			upstreamAddrs = append(upstreamAddrs, uaddr)
 		}
 	}
 	upstreamAddrs = append(upstreamAddrs, self.upstreams...)
@@ -265,7 +265,7 @@ func (self *DNSServer) questionUpstream(upstreamAddr string, msg []byte) ([]byte
 	} else {
 		logger.Debug(dnsmsg.String())
 		self.cache.Insert(
-			q.Name, int(q.Qtype), msg, 10)
+			q.Name, int(q.Qtype), msg, 3)
 	}
 
 	upMsg[0] = qid[0]
