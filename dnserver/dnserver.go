@@ -260,12 +260,12 @@ func (self *DNSServer) questionUpstream(upstreamAddr string, msg []byte) ([]byte
 	if len(dnsmsg.answer) > 0 {
 		logger.Debug("DNS Reply %s:%d", q.Name, q.Qtype)
 		self.cache.Insert(
-			q.Name, int(q.Qtype), msg,
+			q.Name, int(q.Qtype), upMsg,
 			int(dnsmsg.answer[0].Header().Ttl))
 	} else {
 		logger.Debug(dnsmsg.String())
 		self.cache.Insert(
-			q.Name, int(q.Qtype), msg, 3)
+			q.Name, int(q.Qtype), upMsg, 3)
 	}
 
 	upMsg[0] = qid[0]
