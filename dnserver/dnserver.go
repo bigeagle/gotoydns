@@ -120,7 +120,10 @@ func (self *DNSServer) initServer(configFile string) error {
 func (self *DNSServer) ServeForever() error {
 
 	for {
-		msg, clientAddr, _ := self.conn.ReadPacketFrom()
+		msg, clientAddr, err := self.conn.ReadPacketFrom()
+		if err != nil {
+			continue
+		}
 		go self.handleClient(msg, clientAddr)
 	}
 
@@ -205,7 +208,7 @@ func (self *DNSServer) questionUpstream(entry *upstreamEntry, dnsq *dnsMsg) ([]b
 	for i := 0; i < self.cfg.Repeat; i++ {
 		conn.Write(msg)
 	}
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 
 	upMsg, err := conn.Read()
 

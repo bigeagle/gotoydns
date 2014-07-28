@@ -25,6 +25,7 @@ func newCipher(key []byte) (*dnsCipher, error) {
 }
 
 func (s *dnsCipher) encrypt(msg []byte) []byte {
+	crc := crc32.ChecksumIEEE(msg)
 	pmsg := PKCS5Padding(msg, cipherBlockSize)
 	buf := make([]byte, len(pmsg)+cipherBlockSize+4)
 
@@ -32,8 +33,9 @@ func (s *dnsCipher) encrypt(msg []byte) []byte {
 	rand.Read(iv)
 	encrypter := _cipher.NewCBCEncrypter(s.block, iv)
 	encrypter.CryptBlocks(buf[cipherBlockSize:len(buf)-4], pmsg)
-	crc := crc32.ChecksumIEEE(pmsg)
+
 	binary.BigEndian.PutUint32(buf[len(buf)-4:], crc)
+	// logger.Debug("%v, %v", crc, buf[len(buf)-4:])
 
 	return buf
 }
@@ -50,6 +52,10 @@ func (s *dnsCipher) decrypt(ctext []byte) []byte {
 	pmsg := s._decrypt(iv, cmsg)
 
 	if binary.BigEndian.Uint32(crc) != crc32.ChecksumIEEE(pmsg) {
+		// logger.Debug("%v %v", crc, crc32.ChecksumIEEE(pmsg))
+		// buf := []byte{0, 0, 0, 0}
+		// binary.BigEndian.PutUint32(buf, crc32.ChecksumIEEE(pmsg))
+		// logger.Debug("%v", buf)
 		return []byte{}
 	}
 	return pmsg
