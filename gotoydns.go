@@ -1,63 +1,53 @@
 package main
 
 import (
-    "flag"
-    "github.com/bigeagle/go-logging"
-    "github.com/bigeagle/gotoydns/dnserver"
-    stdlog "log"
-    "os"
-    "strings"
+	"flag"
+	stdlog "log"
+	"os"
+
+	"github.com/bigeagle/go-logging"
+	"github.com/bigeagle/gotoydns/dnserver"
 )
 
-var addr, port string
-var upstream string
-var recordfile string
+var configFile string
 var debugMode bool
 var logger = logging.MustGetLogger("toydnsd")
 
 func initLogging() {
 
-    stdoutBackend := logging.NewLogBackend(os.Stdout, "", stdlog.LstdFlags|stdlog.Lshortfile)
-    logging.SetBackend(stdoutBackend)
+	stdoutBackend := logging.NewLogBackend(os.Stdout, "", stdlog.LstdFlags|stdlog.Lshortfile)
+	logging.SetBackend(stdoutBackend)
 
-    if debugMode {
-        stdoutBackend.Color = true
-        logging.SetLevel(logging.DEBUG, "toydnsd")
-    } else {
-        logging.SetLevel(logging.INFO, "toydnsd")
-    }
+	if debugMode {
+		stdoutBackend.Color = true
+		logging.SetLevel(logging.DEBUG, "toydnsd")
+	} else {
+		logging.SetLevel(logging.INFO, "toydnsd")
+	}
 
 }
 
 func checkError(err error) {
-    if err != nil {
-        logger.Fatal(err.Error())
-        os.Exit(1)
-    }
+	if err != nil {
+		logger.Fatal(err.Error())
+		os.Exit(1)
+	}
 }
 
 func main() {
-    flag.StringVar(&addr, "b", "", "Address to bind")
-    flag.StringVar(&port, "p", "53", "DNS Server port")
-    flag.StringVar(&upstream, "u", "166.111.8.28:53", "Upstream server addr:port")
-    flag.StringVar(&recordfile, "r", "", "Record file")
-    flag.BoolVar(&debugMode, "debug", false, "Debug")
+	flag.StringVar(&configFile, "c", "/etc/godnsd.conf", "Config File")
+	flag.BoolVar(&debugMode, "debug", false, "Debug")
+	flag.Parse()
 
-    flag.Parse()
+	initLogging()
 
-    if !strings.HasPrefix(port, ":") {
-        port = ":" + port
-    }
-    port = addr + port
+	//logger.Debug(port)
+	logger.Debug(configFile)
+	dnserver, err := toydns.NewServer(configFile, logger)
 
-    initLogging()
+	if err != nil {
+		logger.Fatal("Failed to init DNS server: ", err)
+	}
 
-    //logger.Debug(port)
-
-    dnserver, err := toydns.NewServer(port, upstream, recordfile, logger)
-    if err != nil {
-        logger.Fatal("Failed to init DNS server: ", err)
-    }
-
-    dnserver.ServeForever()
+	dnserver.ServeForever()
 }
