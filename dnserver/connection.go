@@ -170,20 +170,33 @@ func (u *cryptDNSConn) ReadPacketFrom() (*dnsMsg, net.Addr, error) {
 
 	}
 
-	msg := new(dnsMsg)
-	_, err = msg.Unpack(u.cipher.decrypt(buf[:n]), 0)
+	msg := u.cipher.decrypt(buf[:n])
+	if len(msg) == 0 {
+		err = errors.New("Bad Packet")
+		return nil, clientAddr, err
+	}
+
+	dmsg := new(dnsMsg)
+	_, err = dmsg.Unpack(msg, 0)
 	if err != nil {
 		logger.Error(err.Error())
 		return nil, clientAddr, err
 	}
 
-	return msg, clientAddr, nil
+	return dmsg, clientAddr, nil
 }
 
 func (u *cryptDNSConn) Read() ([]byte, error) {
 	buf := make([]byte, 1024)
 	n, err := u.udpConn.Read(buf)
-	return u.cipher.decrypt(buf[:n]), err
+	if err != nil {
+		return []byte{}, err
+	}
+	msg := u.cipher.decrypt(buf[:n])
+	if len(msg) == 0 {
+		err = errors.New("Bad Packet")
+	}
+	return msg, err
 }
 
 func (u *cryptDNSConn) WritePacketTo(p *dnsMsg, addr net.Addr) error {

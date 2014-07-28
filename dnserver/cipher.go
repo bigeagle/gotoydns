@@ -5,6 +5,8 @@ import (
 	"crypto/aes"
 	_cipher "crypto/cipher"
 	"crypto/rand"
+	"encoding/binary"
+	"hash/crc32"
 )
 
 type dnsCipher struct {
@@ -24,18 +26,33 @@ func newCipher(key []byte) (*dnsCipher, error) {
 
 func (s *dnsCipher) encrypt(msg []byte) []byte {
 	pmsg := PKCS5Padding(msg, cipherBlockSize)
-	buf := make([]byte, len(pmsg)+cipherBlockSize)
+	buf := make([]byte, len(pmsg)+cipherBlockSize+4)
 
 	iv := buf[:cipherBlockSize]
 	rand.Read(iv)
 	encrypter := _cipher.NewCBCEncrypter(s.block, iv)
-	encrypter.CryptBlocks(buf[cipherBlockSize:], pmsg)
+	encrypter.CryptBlocks(buf[cipherBlockSize:len(buf)-4], pmsg)
+	crc := crc32.ChecksumIEEE(pmsg)
+	binary.BigEndian.PutUint32(buf[len(buf)-4:], crc)
 
 	return buf
 }
 
 func (s *dnsCipher) decrypt(ctext []byte) []byte {
-	return s._decrypt(ctext[:cipherBlockSize], ctext[cipherBlockSize:])
+	if len(ctext) < (cipherBlockSize<<1)+4 {
+		return []byte{}
+	}
+
+	iv := ctext[:cipherBlockSize]
+	cmsg := ctext[cipherBlockSize : len(ctext)-4]
+	crc := ctext[len(ctext)-4:]
+
+	pmsg := s._decrypt(iv, cmsg)
+
+	if binary.BigEndian.Uint32(crc) != crc32.ChecksumIEEE(pmsg) {
+		return []byte{}
+	}
+	return pmsg
 }
 
 func (s *dnsCipher) _decrypt(iv []byte, ctext []byte) []byte {
