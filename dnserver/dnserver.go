@@ -208,7 +208,7 @@ func (self *DNSServer) questionUpstream(entry *upstreamEntry, dnsq *dnsMsg) ([]b
 	for i := 0; i < self.cfg.Repeat; i++ {
 		conn.Write(msg)
 	}
-	conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 
 	upMsg, err := conn.Read()
 

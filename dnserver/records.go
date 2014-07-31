@@ -244,7 +244,8 @@ func queryDB(qname string, qtype int, db *domainDB, ans *[]dnsRR) (found bool) {
 }
 
 func getUpstreamAddr(qname string) (string, bool) {
-	queryKeys := strings.Split(qname[:len(qname)-1], ".") // ignore last '.'
+	queryKeys := strings.Split(qname, ".")
+	queryKeys = queryKeys[:len(queryKeys)-1] // ignore last '.'
 
 	if v, found := upstreamTree.search(queryKeys); found {
 		logger.Debug("found upstream: %v", v)
