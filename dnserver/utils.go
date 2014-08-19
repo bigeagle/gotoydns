@@ -23,6 +23,9 @@ func ip2int(a, b, c, d int) uint32 {
 }
 
 func gfwPolluted(d *dnsMsg) bool {
+	if len(d.question) < 1 {
+		return false
+	}
     q := d.question[0]
     //log.Debug("%v", d)
     // Now only AAAA pollution is supported
