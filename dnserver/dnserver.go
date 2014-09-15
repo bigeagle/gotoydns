@@ -179,9 +179,11 @@ func (self *DNSServer) handleClient(dnsq *dnsMsg, clientAddr net.Addr) {
 
 	upstreamEntries = append(upstreamEntries, self.upstreams...)
 	for _, upstream := range upstreamEntries {
-		if replyMsg, err := self.questionUpstream(upstream, dnsq); err == nil {
+		if replyMsg, err := self.questionUpstream(upstream, *dnsq); err == nil {
 			self.conn.WriteTo(replyMsg, clientAddr)
 			return
+		} else {
+			logger.Error(upstream.udpAddr + err.Error())
 		}
 	}
 
@@ -196,12 +198,12 @@ func (self *DNSServer) handleClient(dnsq *dnsMsg, clientAddr net.Addr) {
 
 }
 
-func (self *DNSServer) questionUpstream(entry *upstreamEntry, dnsq *dnsMsg) ([]byte, error) {
+func (self *DNSServer) questionUpstream(entry *upstreamEntry, dnsq dnsMsg) ([]byte, error) {
 	conn, err := dialUpstream(entry)
 	if err != nil {
 		return nil, err
 	}
-
+	// logger.Debug("%s", dnsq)
 	qid := dnsq.id
 	msg, _ := dnsq.Pack()
 
@@ -243,6 +245,10 @@ func (self *DNSServer) questionUpstream(entry *upstreamEntry, dnsq *dnsMsg) ([]b
 		err = fmt.Errorf("GFW polluted %s", dnsmsg)
 		logger.Error(err.Error())
 		return nil, err
+	}
+
+	if len(dnsmsg.question) == 0 {
+		return nil, errors.New("Invalid Question")
 	}
 
 	q := dnsmsg.question[0]
